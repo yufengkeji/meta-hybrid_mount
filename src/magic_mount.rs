@@ -26,6 +26,65 @@ const SKIP_MOUNT_FILE_NAME: &str = "skip_mount";
 
 const REPLACE_DIR_XATTR: &str = "trusted.overlay.opaque";
 
+const KSU_INSTALL_MAGIC1: u32 = 0xDEADBEEF;
+const KSU_IOCTL_ADD_TRY_UMOUNT: u32 = 0x40004b12;
+const KSU_INSTALL_MAGIC2: u32 = 0xCAFEBABE;
+
+#[repr(C)]
+struct KsuAddTryUmount {
+    arg: u64,
+    flags: u32,
+    mode: u8,
+}
+
+fn grab_fd() -> i32 {
+    let mut fd = -1;
+    unsafe {
+        libc::syscall(
+            libc::SYS_reboot,
+            KSU_INSTALL_MAGIC1,
+            KSU_INSTALL_MAGIC2,
+            0,
+            &mut fd,
+        );
+    };
+    fd
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn send_unmountable<P>(target: P)
+where
+    P: AsRef<Path>,
+{
+    let path = target.as_ref().to_string_lossy().as_ptr() as u64;
+    let cmd = KsuAddTryUmount {
+        arg: path,
+        flags: 0x2,
+        mode: 1,
+    };
+
+    unsafe {
+        #[cfg(target_env = "gnu")]
+        libc::ioctl(
+            grab_fd() as libc::c_int,
+            KSU_IOCTL_ADD_TRY_UMOUNT as u64,
+            cmd,
+        );
+
+        #[cfg(not(target_env = "gnu"))]
+        libc::ioctl(
+            grab_fd() as libc::c_int,
+            KSU_IOCTL_ADD_TRY_UMOUNT as i32,
+            cmd,
+        );
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+pub fn send_unmountable() {
+    unimplemented!()
+}
+
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 enum NodeFileType {
     RegularFile,
@@ -284,6 +343,8 @@ fn do_magic_mount<P: AsRef<Path>, WP: AsRef<Path>>(
                     work_dir_path.display()
                 );
                 mount_bind(module_path, target_path).with_context(|| {
+                    // tell ksu about this mount
+                    send_unmountable(target_path);
                     format!("mount module file {module_path:?} -> {work_dir_path:?}")
                 })?;
                 // we should use MS_REMOUNT | MS_BIND | MS_xxx to change mount flags
@@ -451,6 +512,8 @@ fn do_magic_mount<P: AsRef<Path>, WP: AsRef<Path>>(
                 if let Err(e) = mount_change(&path, MountPropagationFlags::PRIVATE) {
                     log::warn!("make dir {path:?} private: {e:#?}");
                 }
+                // tell ksu about this one too
+                send_unmountable(path);
             }
         }
         Whiteout => {
