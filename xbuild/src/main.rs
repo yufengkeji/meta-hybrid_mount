@@ -53,6 +53,11 @@ fn main() -> Result<()> {
         fs::remove_file(temp_dir.join(".gitignore"))?;
     }
 
+    // Inject Git Commit ID into module.prop
+    if let Err(e) = inject_version(&temp_dir) {
+        println!("Warning: Failed to inject version: {}", e);
+    }
+
     // Copy binary (Rename to meta-hybrid)
     file::copy(
         bin_path(),
@@ -64,7 +69,6 @@ fn main() -> Result<()> {
     build_webui()?;
 
     // Zip it
-    // FIX: Explicitly specify the type parameter <()> for FileOptions
     let options = FileOptions::<()>::default()
         .compression_method(CompressionMethod::Deflated)
         .compression_level(Some(9));
@@ -81,6 +85,33 @@ fn main() -> Result<()> {
     )?;
 
     println!("Build success: {}", output_zip.display());
+    Ok(())
+}
+
+fn inject_version(temp_dir: &Path) -> Result<()> {
+    // Get git short hash
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()?;
+    
+    if output.status.success() {
+        let hash = String::from_utf8(output.stdout)?.trim().to_string();
+        let prop_path = temp_dir.join("module.prop");
+        
+        if prop_path.exists() {
+            let content = fs::read_to_string(&prop_path)?;
+            let new_content = content.lines().map(|line| {
+                if line.starts_with("version=") {
+                    format!("{}-g{}", line, hash)
+                } else {
+                    line.to_string()
+                }
+            }).collect::<Vec<_>>().join("\n");
+            
+            fs::write(prop_path, new_content)?;
+            println!("Injected version with commit hash: {}", hash);
+        }
+    }
     Ok(())
 }
 

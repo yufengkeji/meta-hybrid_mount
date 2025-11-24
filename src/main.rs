@@ -12,7 +12,7 @@ mod overlay_mount;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::fs;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 use config::{Config, CONFIG_FILE_DEFAULT};
 
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
             if part_dir.is_dir() {
                 partition_map.entry(part.to_string())
                     .or_default()
-                    .push(content_path.clone()); // We push the module root, not the partition dir for Magic Mount convenience
+                    .push(content_path.clone()); 
                 
                 if is_magic {
                     magic_force_map.insert(part.to_string(), true);
@@ -147,8 +147,6 @@ fn main() -> Result<()> {
     }
 
     // Second pass: Collect modules for Magic Mount
-    // Magic Mount engine (modified) takes a list of module roots and processes them recursively
-    // We need to gather ALL modules that touch ANY partition marked as "magic"
     let mut magic_partitions = Vec::new();
     for (part, _) in &partition_map {
         if *magic_force_map.get(part).unwrap_or(&false) {
@@ -168,8 +166,6 @@ fn main() -> Result<()> {
         
         let module_list: Vec<PathBuf> = magic_modules.into_iter().collect();
         
-        // Call the modified magic_mount engine
-        // Note: You need to update magic_mount/mod.rs to expose `mount_partitions` instead of `magic_mount`
         if let Err(e) = magic_mount::mount_partitions(
             &tempdir, 
             &module_list, 

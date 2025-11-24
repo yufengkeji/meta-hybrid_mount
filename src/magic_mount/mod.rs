@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use rustix::{
     fs::{Gid, Mode, Uid, chmod, chown},
     mount::{
@@ -181,7 +181,6 @@ fn do_magic_mount<P: AsRef<Path>, WP: AsRef<Path>>(
                 let (metadata, src_path) = if path.exists() { (path.metadata()?, &path) } 
                                            else { (current.module_path.as_ref().unwrap().metadata()?, current.module_path.as_ref().unwrap()) };
                 chmod(&work_dir_path, Mode::from_raw_mode(metadata.mode()))?;
-                // FIX: Added unsafe block
                 unsafe {
                     chown(&work_dir_path, Some(Uid::from_raw(metadata.uid())), Some(Gid::from_raw(metadata.gid())))?;
                 }
@@ -236,7 +235,6 @@ pub fn mount_partitions(
         let tmp_dir = tmp_path.join("workdir");
         ensure_dir_exists(&tmp_dir)?;
 
-        // FIX: Changed None to "" for data argument to satisfy rustix::path::Arg trait
         mount(mount_source, &tmp_dir, "tmpfs", MountFlags::empty(), "").context("mount tmp")?;
         mount_change(&tmp_dir, MountPropagationFlags::PRIVATE).context("make tmp private")?;
 

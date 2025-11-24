@@ -18,6 +18,9 @@ pub const SKIP_MOUNT_FILE_NAME: &str = "skip_mount";
 
 // OverlayFS Source Name
 pub const OVERLAY_SOURCE: &str = "HybridMount";
+
+// --- Fixes for compilation errors ---
 pub const KSU_OVERLAY_SOURCE: &str = OVERLAY_SOURCE;
 // Path for overlayfs workdir/upperdir (if needed in future)
+#[allow(dead_code)]
 pub const SYSTEM_RW_DIR: &str = "/data/adb/meta-hybrid/rw";

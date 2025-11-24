@@ -1,3 +1,6 @@
+// Overlayfs mounting implementation
+// Migrated from ksud/src/mount.rs and ksud/src/init_event.rs
+
 use anyhow::{Context, Result, bail};
 use log::{info, warn};
 use std::collections::HashMap;
@@ -186,6 +189,7 @@ pub fn umount_dir(src: impl AsRef<Path>) -> Result<()> {
 
 // ========== Mount coordination logic (from init_event.rs) ==========
 
+#[allow(dead_code)]
 fn mount_partition(partition_name: &str, lowerdir: &Vec<String>) -> Result<()> {
     if lowerdir.is_empty() {
         warn!("partition: {partition_name} lowerdir is empty");
@@ -214,6 +218,7 @@ fn mount_partition(partition_name: &str, lowerdir: &Vec<String>) -> Result<()> {
 /// Collect enabled module IDs from metadata directory
 ///
 /// Reads module list and status from metadata directory, returns enabled module IDs
+#[allow(dead_code)]
 fn collect_enabled_modules(metadata_dir: &str) -> Result<Vec<String>> {
     let dir = std::fs::read_dir(metadata_dir)
         .with_context(|| format!("Failed to read metadata directory: {}", metadata_dir))?;
@@ -260,6 +265,7 @@ fn collect_enabled_modules(metadata_dir: &str) -> Result<Vec<String>> {
 /// Parameters:
 /// - metadata_dir: Metadata directory, stores module.prop, disable, skip_mount, etc.
 /// - content_dir: Content directory, stores system/, vendor/ and other partition content (ext4 image mount point)
+#[allow(dead_code)]
 pub fn mount_modules_systemlessly(metadata_dir: &str, content_dir: &str) -> Result<()> {
     info!("Scanning modules (dual-directory mode)");
     info!("  Metadata: {}", metadata_dir);
