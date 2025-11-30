@@ -14,6 +14,8 @@ use anyhow::{Context, Result, bail};
 use rustix::mount::{mount, MountFlags};
 use rustix::path::Arg;
 
+use crate::defs;
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use extattr::{Flags as XattrFlags, lsetxattr};
 
@@ -200,29 +202,14 @@ pub fn ensure_temp_dir(temp_dir: &Path) -> Result<()> {
 }
 
 pub fn select_temp_dir() -> Result<PathBuf> {
-    let candidates = [
-        "/debug_ramdisk",
-        "/sbin",
-        "/dev",
-        "/mnt",
-        "/data/local/tmp",
-        "/data/adb/meta-hybrid"
-    ];
+    let run_dir = Path::new(defs::RUN_DIR);
+    ensure_dir_exists(run_dir)?;
 
-    for base in candidates {
-        let path = Path::new(base);
-        if !path.is_dir() { continue; }
+    let work_dir = run_dir.join("workdir");
 
-        let probe_dir = path.join(".mm_rw_probe");
-        if create_dir(&probe_dir).is_ok() {
-            let _ = remove_dir(&probe_dir);
-            let work_dir = path.join("meta_hybrid_work");
-            log::debug!("Selected temp dir base: {}", path.display());
-            return Ok(work_dir);
-        }
-    }
-
-    bail!("No writable temporary directory found! Checked: {:?}", candidates)
+    log::debug!("Selected temp dir: {}", work_dir.display());
+    
+    Ok(work_dir)
 }
 
 pub fn get_kernel_release() -> Result<String> {
