@@ -53,9 +53,10 @@ where
         let level = *event.metadata().level();
         // Write level in brackets, e.g., "[INFO] "
         write!(writer, "[{}] ", level)?;
+        
         // Write the actual log message (and other fields if any)
-        // Fixed: Passed &mut writer to format()
-        ctx.field_format().format(&mut writer, event)
+        // Fixed: Use ctx.format_fields which handles the writer and event correctly
+        ctx.format_fields(writer, event)
     }
 }
 
