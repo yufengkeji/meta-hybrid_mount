@@ -147,7 +147,7 @@ fn do_mount_overlay(
         )
     })();
 
-    if let Err(e) = result {
+    if let Err(fsopen_err) = result {
         let mut data = format!("lowerdir={lowerdir_config}");
         if let (Some(upperdir), Some(workdir)) = (upperdir_s, workdir_s) {
             data = format!("{data},upperdir={upperdir},workdir={workdir}");
@@ -158,7 +158,7 @@ fn do_mount_overlay(
             "overlay",
             MountFlags::empty(),
             data,
-        ).map_err(|e| anyhow::anyhow!("Legacy mount failed: {} (fsopen error: {})", e, e))?;
+        ).map_err(|mount_err| anyhow::anyhow!("Legacy mount failed: {} (fsopen error: {})", mount_err, fsopen_err))?;
     }
     
     if !disable_umount {
