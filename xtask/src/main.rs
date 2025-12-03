@@ -1,7 +1,7 @@
 use std::{
     env,
-    fs, 
-    path::{Path, PathBuf},
+    fs,
+    path::PathBuf,
     process::Command,
 };
 
@@ -88,6 +88,7 @@ fn build(release: bool, arch: Arch) -> Result<()> {
             eprintln!("Warning: Failed to auto-install target {}", arch.target());
         }
     }
+
     println!("Building for ABI: {} (API {})", arch.android_abi(), arch.api_level());
 
     let mut cmd = Command::new(&cargo);
@@ -111,6 +112,7 @@ fn build(release: bool, arch: Arch) -> Result<()> {
     if !status.success() {
         anyhow::bail!("Build failed");
     }
+
     let bin_name = "meta-hybrid"; 
     let profile = if release { "release" } else { "debug" };
     
@@ -118,6 +120,7 @@ fn build(release: bool, arch: Arch) -> Result<()> {
         .join(arch.target())
         .join(profile)
         .join(bin_name);
+
     let output_dir = PathBuf::from("output/module_files/system/bin");
     fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
 
