@@ -1,5 +1,6 @@
 use std::{
     env,
+    fs, 
     path::{Path, PathBuf},
     process::Command,
 };
@@ -37,6 +38,7 @@ impl Arch {
             Arch::Riscv64 => "riscv64",
         }
     }
+    
     fn api_level(&self) -> &'static str {
         match self {
             Arch::Riscv64 => "35",
@@ -75,6 +77,7 @@ fn main() -> Result<()> {
 
 fn build(release: bool, arch: Arch) -> Result<()> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    
     if !matches!(arch, Arch::Riscv64) {
         let status = Command::new("rustup")
             .args(["target", "add", arch.target()])
@@ -85,6 +88,8 @@ fn build(release: bool, arch: Arch) -> Result<()> {
             eprintln!("Warning: Failed to auto-install target {}", arch.target());
         }
     }
+    println!("Building for ABI: {} (API {})", arch.android_abi(), arch.api_level());
+
     let mut cmd = Command::new(&cargo);
     
     cmd.arg("ndk")
@@ -92,6 +97,7 @@ fn build(release: bool, arch: Arch) -> Result<()> {
        .arg("-p").arg(arch.api_level());
 
     cmd.arg("build");
+
     if matches!(arch, Arch::Riscv64) {
         cmd.arg("-Z").arg("build-std");
         cmd.arg("--target").arg(arch.target());
@@ -104,6 +110,24 @@ fn build(release: bool, arch: Arch) -> Result<()> {
     let status = cmd.status().context("Failed to run cargo ndk build")?;
     if !status.success() {
         anyhow::bail!("Build failed");
+    }
+    let bin_name = "meta-hybrid"; 
+    let profile = if release { "release" } else { "debug" };
+    
+    let src_path = PathBuf::from("target")
+        .join(arch.target())
+        .join(profile)
+        .join(bin_name);
+    let output_dir = PathBuf::from("output/module_files/system/bin");
+    fs::create_dir_all(&output_dir).context("Failed to create output directory")?;
+
+    let dst_path = output_dir.join(bin_name);
+
+    if src_path.exists() {
+        fs::copy(&src_path, &dst_path).context("Failed to copy binary to output")?;
+        println!("Artifact copied to: {}", dst_path.display());
+    } else {
+        anyhow::bail!("Build finished but binary not found at: {}", src_path.display());
     }
 
     Ok(())
