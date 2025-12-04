@@ -96,27 +96,19 @@ fn build_full(root: &Path, release: bool, skip_webui: bool) -> Result<()> {
     let output_dir = root.join("output");
     let stage_dir = output_dir.join("staging");
     
-    // 1. Clean output
     if output_dir.exists() { fs::remove_dir_all(&output_dir)?; }
     fs::create_dir_all(&stage_dir)?;
 
-    // 2. Build WebUI
     if !skip_webui {
         println!(":: Building WebUI...");
         build_webui(root)?;
-        
-        // Vite outputs to ../module/webroot by default (relative to webui dir)
-        // So we don't need to copy it here explicitly if we copy the whole module folder later
-        // But to be safe and clean, let's make sure `module/webroot` is fresh
     }
 
-    // 3. Compile Binaries for ALL architectures
     let archs = [Arch::Arm64, Arch::X86_64, Arch::Riscv64];
     for arch in archs {
         println!(":: Compiling Core for {:?}...", arch);
         compile_core(root, release, arch)?;
         
-        // Copy binary to staging
         let bin_name = "meta-hybrid";
         let profile = if release { "release" } else { "debug" };
         let src_bin = root.join("target")
@@ -133,22 +125,18 @@ fn build_full(root: &Path, release: bool, skip_webui: bool) -> Result<()> {
         }
     }
 
-    // 4. Copy Module Scripts & WebUI
     println!(":: Copying module scripts...");
     let module_src = root.join("module");
     let options = CopyOptions::new().overwrite(true).content_only(true);
     dir::copy(&module_src, &stage_dir, &options)?;
     
-    // Remove dev artifacts from module dir if any
     let gitignore = stage_dir.join(".gitignore");
     if gitignore.exists() { fs::remove_file(gitignore)?; }
 
-    // 5. Inject Version
     let version = get_version(root)?;
     println!(":: Injecting version: {}", version);
     update_module_prop(&stage_dir.join("module.prop"), &version)?;
 
-    // 6. Zip It
     println!(":: Creating Zip...");
     let zip_file = output_dir.join(format!("Meta-Hybrid-{}.zip", version));
     let zip_options = FileOptions::default()
@@ -166,7 +154,6 @@ fn build_full(root: &Path, release: bool, skip_webui: bool) -> Result<()> {
 }
 
 fn build_webui(root: &Path) -> Result<()> {
-    // Generate constants first
     generate_webui_constants(root)?;
 
     let webui_dir = root.join("webui");
@@ -180,7 +167,7 @@ fn build_webui(root: &Path) -> Result<()> {
 
     let status = Command::new(npm)
         .current_dir(&webui_dir)
-        .args(["run", "build"]) // Configured in vite.config.js to output to ../module/webroot
+        .args(["run", "build"])
         .status()?;
     if !status.success() { anyhow::bail!("npm run build failed"); }
 
@@ -209,14 +196,12 @@ export const BUILTIN_PARTITIONS = ["system", "vendor", "product", "system_ext", 
 fn compile_core(root: &Path, release: bool, arch: Arch) -> Result<()> {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     
-    // Auto-install target (except RISC-V)
     if !matches!(arch, Arch::Riscv64) {
         let _ = Command::new("rustup")
             .args(["target", "add", arch.target()])
             .status();
     }
 
-    // Setup NDK env
     let ndk_home = env::var("ANDROID_NDK_HOME").context("ANDROID_NDK_HOME not set")?;
     let host_os = std::env::consts::OS;
     let host_tag = match host_os {
@@ -258,7 +243,6 @@ fn compile_core(root: &Path, release: bool, arch: Arch) -> Result<()> {
         cmd.arg("--release");
     }
 
-    // Set Environment Variables
     let path_val = env::var("PATH").unwrap_or_default();
     cmd.env("PATH", format!("{}:{}", toolchain_bin.display(), path_val));
     
@@ -277,12 +261,10 @@ fn compile_core(root: &Path, release: bool, arch: Arch) -> Result<()> {
 }
 
 fn get_version(root: &Path) -> Result<String> {
-    // 1. Try Environment Variable (CI)
     if let Ok(v) = env::var("META_HYBRID_VERSION") {
         if !v.is_empty() { return Ok(v); }
     }
 
-    // 2. Try git describe
     let output = Command::new("git").args(["describe", "--tags", "--always", "--dirty"]).output();
     if let Ok(o) = output {
         if o.status.success() {
@@ -290,10 +272,8 @@ fn get_version(root: &Path) -> Result<String> {
         }
     }
 
-    // 3. Fallback to Cargo.toml
-    let toml_path = root.join("module/config.toml"); // Or Cargo.toml
+    let toml_path = root.join("module/config.toml");
     if toml_path.exists() {
-        // Simple parse, assuming `version = "..."` exists
         let content = fs::read_to_string(toml_path)?;
         for line in content.lines() {
             if line.trim().starts_with("version") {
@@ -312,12 +292,15 @@ fn update_module_prop(path: &Path, version: &str) -> Result<()> {
     let content = fs::read_to_string(path)?;
     let mut new_lines = Vec::new();
     
-    // Simple hash-based version code
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    version.hash(&mut hasher);
-    let code = (hasher.finish() % 100000) as u32;
+    let code = if let Ok(env_code) = env::var("META_HYBRID_CODE") {
+        env_code
+    } else {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        version.hash(&mut hasher);
+        ((hasher.finish() % 100000) as u32).to_string()
+    };
 
     for line in content.lines() {
         if line.starts_with("version=") {

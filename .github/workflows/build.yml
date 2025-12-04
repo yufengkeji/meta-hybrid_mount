@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
-          fetch-depth: 0 # 为了 git describe 能获取版本信息
+          fetch-depth: 0
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -51,14 +51,13 @@ jobs:
 
       - name: Set Version Env
         run: |
-          # 自动生成版本号，例如 v0.2.8-ci.42
           BASE_VER="v0.2.8"
           CI_VER="${BASE_VER}-ci.${{ github.run_number }}"
           echo "META_HYBRID_VERSION=$CI_VER" >> $GITHUB_ENV
+          echo "META_HYBRID_CODE=${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Build All
         run: |
-          # 一条命令搞定：WebUI + 多架构编译 + 打包
           cargo run -p xtask -- build --release
 
       - name: Upload Artifact
