@@ -47,7 +47,7 @@ const createStore = () => {
   
   // --- Device/Status State ---
   let device = $state<DeviceInfo>({ model: 'Loading...', android: '-', kernel: '-', selinux: '-' });
-  let version = $state('...');
+  let version = $state('v1.0.2-r2');
   let storage = $state<StorageStatus>({ used: '-', size: '-', percent: '0%', type: null });
   let systemInfo = $state<SystemInfo>({ kernel: '-', selinux: '-', mountBase: '-', activeMounts: [] });
   let activePartitions = $state<string[]>([]);
