@@ -17,12 +17,12 @@ use rustix::{
 
 use crate::{
     defs::{DISABLE_FILE_NAME, REMOVE_FILE_NAME, SKIP_MOUNT_FILE_NAME},
-    mount::{
-        node::{Node, NodeFileType},
-        try_umount::send_unmountable,
-    },
+    mount::node::{Node, NodeFileType},
     utils::{ensure_dir_exists, lgetfilecon, lsetfilecon},
 };
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::mount::try_umount::send_unmountable;
 
 const ROOT_PARTITIONS: [&str; 4] = [
     "vendor",
@@ -198,7 +198,13 @@ where
 }
 
 #[allow(clippy::too_many_lines)]
-fn do_magic_mount<P>(path: P, work_dir_path: P, current: Node, has_tmpfs: bool, disable_umount: bool) -> Result<()>
+fn do_magic_mount<P>(
+    path: P,
+    work_dir_path: P,
+    current: Node,
+    has_tmpfs: bool,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+) -> Result<()>
 where
     P: AsRef<Path>,
 {
@@ -215,6 +221,7 @@ where
             };
             if let Some(module_path) = &current.module_path {
                 mount_bind(module_path, target_path).with_context(|| {
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
                     if !disable_umount {
                         let _ = send_unmountable(target_path);
                     }
@@ -323,8 +330,15 @@ where
                         if node.skip {
                             continue;
                         }
-                        do_magic_mount(&path, &work_dir_path, node, has_tmpfs, disable_umount)
-                            .with_context(|| format!("magic mount {}/{name}", path.display()))
+                        do_magic_mount(
+                            &path,
+                            &work_dir_path,
+                            node,
+                            has_tmpfs,
+                            #[cfg(any(target_os = "linux", target_os = "android"))]
+                            disable_umount,
+                        )
+                        .with_context(|| format!("magic mount {}/{name}", path.display()))
                     } else if has_tmpfs {
                         mount_mirror(&path, &work_dir_path, &entry)
                             .with_context(|| format!("mount mirror {}/{name}", path.display()))
@@ -354,8 +368,15 @@ where
                 if node.skip {
                     continue;
                 }
-                if let Err(e) = do_magic_mount(&path, &work_dir_path, node, has_tmpfs, disable_umount)
-                    .with_context(|| format!("magic mount {}/{name}", path.display()))
+                if let Err(e) = do_magic_mount(
+                    &path,
+                    &work_dir_path,
+                    node,
+                    has_tmpfs,
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    disable_umount,
+                )
+                .with_context(|| format!("magic mount {}/{name}", path.display()))
                 {
                     if has_tmpfs {
                         return Err(e);
@@ -382,6 +403,7 @@ where
                 if let Err(e) = mount_change(&path, MountPropagationFlags::PRIVATE) {
                     log::warn!("make dir {} private: {e:#?}", path.display());
                 }
+                #[cfg(any(target_os = "linux", target_os = "android"))]
                 if !disable_umount {
                     let _ = send_unmountable(path);
                 }
@@ -400,7 +422,8 @@ pub fn mount_partitions(
     module_paths: &[PathBuf],
     mount_source: &str,
     extra_partitions: &[String],
-    disable_umount: bool,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+    #[cfg(not(any(target_os = "linux", target_os = "android")))] _disable_umount: bool,
 ) -> Result<()> {
     if let Some(root) = collect_module_files(module_paths, extra_partitions)? {
         log::debug!("[Magic Mount Tree Constructed]");
@@ -415,7 +438,14 @@ pub fn mount_partitions(
         
         mount_change(&tmp_dir, MountPropagationFlags::PRIVATE).context("make tmp private")?;
 
-        let result = do_magic_mount(Path::new("/"), tmp_dir.as_path(), root, false, disable_umount);
+        let result = do_magic_mount(
+            Path::new("/"),
+            tmp_dir.as_path(),
+            root,
+            false,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            disable_umount,
+        );
 
         if let Err(e) = unmount(&tmp_dir, UnmountFlags::DETACH) {
             log::error!("failed to unmount tmp {e}");

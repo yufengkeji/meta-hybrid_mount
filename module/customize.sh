@@ -1,5 +1,9 @@
 SKIPUNZIP=1
 
+if [ -z $KSU ]; then
+  abort "only support KernelSU!!"
+fi
+
 ui_print "- Extracting module files..."
 unzip -o "$ZIPFILE" -d "$MODPATH" >&2
 
@@ -40,7 +44,6 @@ mkdir -p "$BASE_DIR"
 
 if [ ! -f "$BASE_DIR/config.toml" ]; then
   ui_print "- Installing default config"
-  # 注意：这里假设 zip 根目录有 config.toml，如果没有，unzip 步骤已经释放到了 MODPATH
   cat "$MODPATH/config.toml" > "$BASE_DIR/config.toml"
 fi
 
