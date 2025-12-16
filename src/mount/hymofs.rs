@@ -249,6 +249,7 @@ impl HymoFs {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn set_debug(enable: bool) -> Result<()> {
         let file = Self::open_dev()?;
         let val: i32 = if enable { 1 } else { 0 };

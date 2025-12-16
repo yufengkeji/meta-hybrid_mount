@@ -24,12 +24,16 @@ use tracing_subscriber::{
 use tracing_appender::non_blocking::WorkerGuard;
 use crate::defs;
 use crate::defs::TMPFS_CANDIDATES;
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use nix::ioctl_write_ptr_bad;
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use extattr::{Flags as XattrFlags, lsetxattr};
 
 const SELINUX_XATTR: &str = "security.selinux";
+
+#[allow(dead_code)]
 const XATTR_TEST_FILE: &str = ".xattr_test";
 const DEFAULT_CONTEXT: &str = "u:object_r:system_file:s0";
 const OVERLAY_TEST_XATTR: &str = "trusted.overlay.test";
@@ -159,6 +163,7 @@ pub fn random_kworker_name() -> String {
     format!("kworker/u{}:{}", x, y)
 }
 
+#[allow(dead_code)]
 pub fn is_xattr_supported(path: &Path) -> bool {
     let test_file = path.join(XATTR_TEST_FILE);
     if let Err(e) = write(&test_file, b"test") {
@@ -336,9 +341,13 @@ pub fn ensure_temp_dir(temp_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+// KSU / IOCTL 逻辑
 const KSU_INSTALL_MAGIC1: u32 = 0xDEADBEEF;
 const KSU_INSTALL_MAGIC2: u32 = 0xCAFEBABE;
+
+// _IOW('K', 17, 0) => 0x40000000 | (0x4b << 8) | 17 = 0x40004b11
 const KSU_IOCTL_NUKE_EXT4_SYSFS: u32 = 0x40004b11; 
+// _IOW('K', 18, 0) => 0x40000000 | (0x4b << 8) | 18 = 0x40004b12
 const KSU_IOCTL_ADD_TRY_UMOUNT: u32 = 0x40004b12;
 
 static DRIVER_FD: OnceLock<RawFd> = OnceLock::new();
@@ -425,7 +434,7 @@ pub fn ksu_nuke_sysfs(target: &str) -> Result<()> {
     
     unsafe {
         ksu_nuke_ext4_sysfs(fd, &cmd)
-            .context(" Nuke Sysfs ioctl failed")?;
+            .context("KSU Nuke Sysfs ioctl failed")?;
     }
     Ok(())
 }
