@@ -11,8 +11,12 @@
   import '@material/web/iconbutton/icon-button.js';
   import '@material/web/icon/icon.js';
   import '@material/web/ripple/ripple.js';
+  import '@material/web/dialog/dialog.js';
+  import '@material/web/button/text-button.js';
 
   let initialConfigStr = $state('');
+  let showResetConfirm = $state(false);
+
   const isValidPath = (p: string) => !p || (p.startsWith('/') && p.length > 1);
   let invalidModuleDir = $derived(!isValidPath(store.config.moduledir));
   let invalidTempDir = $derived(store.config.tempdir && !isValidPath(store.config.tempdir));
@@ -54,6 +58,7 @@
   }
   
   function reset() {
+    showResetConfirm = false;
     store.resetConfig().then(() => {
         initialConfigStr = JSON.stringify(store.config);
     });
@@ -82,6 +87,35 @@
   
   const REPLAY_ICON = "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z";
 </script>
+
+<md-dialog 
+  open={showResetConfirm} 
+  onclose={() => showResetConfirm = false}
+  style="--md-dialog-scrim-color: transparent; --md-sys-color-scrim: transparent;"
+>
+  <div slot="headline">{store.L.config?.resetConfigTitle ?? 'Reset Configuration?'}</div>
+  <div slot="content">
+    {store.L.config?.resetConfigConfirm ?? 'This will reset all backend settings to defaults. Continue?'}
+  </div>
+  <div slot="actions">
+    <md-text-button 
+      onclick={() => showResetConfirm = false}
+      role="button"
+      tabindex="0"
+      onkeydown={() => {}}
+    >
+      {store.L.common?.cancel ?? 'Cancel'}
+    </md-text-button>
+    <md-text-button 
+      onclick={reset}
+      role="button"
+      tabindex="0"
+      onkeydown={() => {}}
+    >
+      {store.L.config?.resetConfig ?? 'Reset Config'}
+    </md-text-button>
+  </div>
+</md-dialog>
 
 <div class="config-container">
   <section class="config-group">
@@ -287,6 +321,22 @@
           <span class="tile-label">{store.L.config?.fixBottomNav || 'Fix Bottom Nav'}</span>
         </div>
       </button>
+
+      <button 
+        class="option-tile clickable error" 
+        onclick={() => showResetConfirm = true}
+        disabled={store.saving.config}
+      >
+        <md-ripple></md-ripple>
+        <div class="tile-top">
+          <div class="tile-icon">
+            <md-icon><svg viewBox="0 0 24 24"><path d={REPLAY_ICON} /></svg></md-icon>
+          </div>
+        </div>
+        <div class="tile-bottom">
+          <span class="tile-label">{store.L.config?.resetConfig || 'Reset Config'}</span>
+        </div>
+      </button>
     </div>
   </section>
 </div>
@@ -303,17 +353,6 @@
     <md-icon><svg viewBox="0 0 24 24"><path d={ICONS.refresh} /></svg></md-icon>
   </md-filled-tonal-icon-button>
   
-  <md-filled-tonal-icon-button 
-    onclick={reset}
-    disabled={store.saving.config}
-    title={store.L.config?.reset || 'Reset to Default'}
-    role="button"
-    tabindex="0"
-    onkeydown={() => {}}
-  >
-    <md-icon><svg viewBox="0 0 24 24"><path d={REPLAY_ICON} /></svg></md-icon>
-  </md-filled-tonal-icon-button>
-
   <div class="spacer"></div>
 
   <md-filled-button 
