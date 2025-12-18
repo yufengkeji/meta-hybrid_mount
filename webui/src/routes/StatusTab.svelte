@@ -96,7 +96,8 @@
                 {store.storage.type?.toUpperCase()}
               </span>
              {/if}
-          </div>
+      
+        </div>
         <div class="storage-value-group">
             <span class="storage-value">{store.storage?.percent ?? '0%'}</span>
             <span class="storage-unit">Used</span>
@@ -221,14 +222,16 @@
         </div>
         <span class="mode-count">{store.modeStats?.magic ?? 0}</span>
       </div>
-      <div class="mode-divider"></div>
-      <div class="mode-row">
-        <div class="mode-name">
-          <div class="dot" style="background-color: var(--md-sys-color-primary)"></div>
-          HymoFS
+      {#if store.storage?.hymofs_available}
+        <div class="mode-divider"></div>
+        <div class="mode-row">
+          <div class="mode-name">
+            <div class="dot" style="background-color: var(--md-sys-color-primary)"></div>
+            HymoFS
+          </div>
+          <span class="mode-count">{store.modeStats?.hymofs || 0}</span>
         </div>
-        <span class="mode-count">{store.modeStats?.hymofs || 0}</span>
-      </div>
+      {/if}
     {/if}
   </div>
 
