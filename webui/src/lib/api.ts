@@ -1,7 +1,7 @@
 import { DEFAULT_CONFIG, PATHS } from './constants';
 import { APP_VERSION } from './constants_gen';
 import { MockAPI } from './api.mock';
-import type { AppConfig, Module, StorageStatus, SystemInfo, DeviceInfo, ModuleRules, ConflictEntry, DiagnosticIssue } from './types';
+import type { AppConfig, Module, StorageStatus, SystemInfo, DeviceInfo, ModuleRules, ConflictEntry, DiagnosticIssue, HymoStatus } from './types';
 
 interface KsuExecResult {
   errno: number;
@@ -288,6 +288,36 @@ const RealAPI = {
     } catch (e) {
         console.error("Reboot failed", e);
     }
+  },
+  getHymoStatus: async (): Promise<HymoStatus> => {
+    if (!ksuExec) return { available: false, protocol_version: 0, config_version: 0, stealth_active: false, debug_active: false, rules: { redirects: [], hides: [], injects: [], xattr_sbs: [] } };
+    const cmd = `${PATHS.BINARY} hymo-status`;
+    try {
+      const { errno, stdout } = await ksuExec(cmd);
+      if (errno === 0 && stdout) {
+        return JSON.parse(stdout);
+      }
+    } catch (e) {
+      console.error("Failed to get Hymo status:", e);
+    }
+    return { available: false, protocol_version: 0, config_version: 0, stealth_active: false, debug_active: false, rules: { redirects: [], hides: [], injects: [], xattr_sbs: [] } };
+  },
+  setHymoStealth: async (enable: boolean): Promise<void> => {
+    if (!ksuExec) return;
+    const val = enable ? "true" : "false";
+    const cmd = `${PATHS.BINARY} hymo-action --action set-stealth --value ${val}`;
+    await ksuExec(cmd);
+  },
+  setHymoDebug: async (enable: boolean): Promise<void> => {
+    if (!ksuExec) return;
+    const val = enable ? "true" : "false";
+    const cmd = `${PATHS.BINARY} hymo-action --action set-debug --value ${val}`;
+    await ksuExec(cmd);
+  },
+  triggerMountReorder: async (): Promise<void> => {
+    if (!ksuExec) return;
+    const cmd = `${PATHS.BINARY} hymo-action --action reorder-mounts`;
+    await ksuExec(cmd);
   }
 };
 

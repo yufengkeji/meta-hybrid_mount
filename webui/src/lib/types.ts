@@ -88,3 +88,25 @@ export interface DiagnosticIssue {
   context: string;
   message: string;
 }
+
+export interface HymoRuleRedirect {
+  src: string;
+  target: string;
+  type: number;
+}
+
+export interface HymoRules {
+  redirects: HymoRuleRedirect[];
+  hides: string[];
+  injects: string[];
+  xattr_sbs: string[];
+}
+
+export interface HymoStatus {
+  available: boolean;
+  protocol_version: number;
+  config_version: number;
+  stealth_active: boolean;
+  debug_active: boolean;
+  rules: HymoRules;
+}
