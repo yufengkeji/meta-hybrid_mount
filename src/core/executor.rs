@@ -160,7 +160,7 @@ pub fn execute(plan: &MountPlan, config: &config::Config) -> Result<ExecutionRes
 
     if !plan.hymo_ops.is_empty() {
         if HymoFs::is_available() {
-            log::info!(">> Phase 1: HymoFS Injection (Merge Mode)...");
+            log::info!(">> Phase 1: HymoFS Injection...");
             if let Err(e) = HymoFs::clear() {
                 log::warn!("Failed to reset HymoFS rules: {}", e);
             }
@@ -201,15 +201,12 @@ pub fn execute(plan: &MountPlan, config: &config::Config) -> Result<ExecutionRes
                 }
 
                 log::debug!(
-                    "Injecting {} (via mirror/merge) -> {}",
+                    "Injecting {} (via mirror) -> {}",
                     op.module_id,
                     op.target.display()
                 );
 
-                match HymoFs::add_merge_rule(
-                    &op.target.to_string_lossy(),
-                    &mirror_base.to_string_lossy(),
-                ) {
+                match HymoFs::inject_directory(&op.target, &mirror_base) {
                     Ok(_) => {
                         if let Some(root) = extract_module_root(&op.source) {
                             global_success_map
@@ -220,7 +217,7 @@ pub fn execute(plan: &MountPlan, config: &config::Config) -> Result<ExecutionRes
                     }
                     Err(e) => {
                         log::error!(
-                            "HymoFS merge rule failed for {}: {}. Fallback to Magic Mount.",
+                            "HymoFS failed for {}: {}. Fallback to Magic Mount.",
                             op.module_id,
                             e
                         );

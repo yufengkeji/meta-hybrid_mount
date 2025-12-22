@@ -40,7 +40,6 @@ ioctl_write_ptr!(ioc_set_debug, HYMO_IOC_MAGIC, 8, i32);
 ioctl_none!(ioc_reorder_mnt_id, HYMO_IOC_MAGIC, 9);
 ioctl_write_ptr!(ioc_set_stealth, HYMO_IOC_MAGIC, 10, i32);
 ioctl_write_ptr!(ioc_hide_overlay_xattrs, HYMO_IOC_MAGIC, 11, HymoIoctlArg);
-ioctl_write_ptr!(ioc_add_merge_rule, HYMO_IOC_MAGIC, 12, HymoIoctlArg);
 
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
@@ -59,18 +58,11 @@ pub struct HymoRuleRedirect {
 }
 
 #[derive(Serialize, Default, Debug)]
-pub struct HymoRuleMerge {
-    pub src: String,
-    pub target: String,
-}
-
-#[derive(Serialize, Default, Debug)]
 pub struct HymoRules {
     pub redirects: Vec<HymoRuleRedirect>,
     pub hides: Vec<String>,
     pub injects: Vec<String>,
     pub xattr_sbs: Vec<String>,
-    pub merges: Vec<HymoRuleMerge>,
 }
 
 #[derive(Serialize, Default, Debug)]
@@ -136,23 +128,6 @@ impl HymoFs {
         };
 
         unsafe { ioc_add_rule(file.as_raw_fd(), &arg) }.context("HymoFS add_rule failed")?;
-        Ok(())
-    }
-
-    pub fn add_merge_rule(src: &str, target: &str) -> Result<()> {
-        debug!("HymoFS: ADD_MERGE_RULE src='{}' target='{}'", src, target);
-        let file = Self::open_dev()?;
-        let c_src = CString::new(src)?;
-        let c_target = CString::new(target)?;
-
-        let arg = HymoIoctlArg {
-            src: c_src.as_ptr(),
-            target: c_target.as_ptr(),
-            type_: 0,
-        };
-
-        unsafe { ioc_add_merge_rule(file.as_raw_fd(), &arg) }
-            .context("HymoFS add_merge_rule failed")?;
         Ok(())
     }
 
@@ -270,14 +245,6 @@ impl HymoFs {
                 "hide_xattr_sb" => {
                     if parts.len() >= 2 {
                         status.rules.xattr_sbs.push(parts[1].to_string());
-                    }
-                }
-                "merge" => {
-                    if parts.len() >= 3 {
-                        status.rules.merges.push(HymoRuleMerge {
-                            src: parts[1].to_string(),
-                            target: parts[2].to_string(),
-                        });
                     }
                 }
                 _ => {}
