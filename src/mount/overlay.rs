@@ -1,100 +1,366 @@
-use std::collections::HashSet;
-use std::ffi::CString;
-use std::fs;
-use std::path::{Path, PathBuf};
-
 use anyhow::{Context, Result, bail};
-use log::{debug, info, warn};
-use procfs::process::Process;
-use rustix::{
-    fd::AsFd,
-    fs::CWD,
-    mount::{
-        MountFlags, MoveMountFlags, OpenTreeFlags, UnmountFlags, mount, move_mount, open_tree,
-        unmount,
-    },
+use log::{info, warn};
+use std::{
+    ffi::CString,
+    fs,
+    io::{BufRead, BufReader},
+    os::fd::{AsRawFd, OwnedFd},
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::defs::KSU_OVERLAY_SOURCE;
+use rustix::{fd::AsFd, fs::CWD, mount::*};
 
-fn mount_overlayfs(
+use crate::defs::{KSU_OVERLAY_SOURCE, RUN_DIR};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::utils::send_unmountable;
+
+const PAGE_LIMIT: usize = 4000;
+
+struct StagedMountGuard {
+    mounts: Vec<PathBuf>,
+    committed: bool,
+}
+
+impl Drop for StagedMountGuard {
+    fn drop(&mut self) {
+        if !self.committed {
+            for path in self.mounts.iter().rev() {
+                let _ = unmount(path, UnmountFlags::DETACH);
+                let _ = fs::remove_dir(path);
+            }
+        }
+    }
+}
+
+fn umount_dir(src: impl AsRef<Path>) -> Result<()> {
+    unmount(src.as_ref(), UnmountFlags::DETACH)
+        .with_context(|| format!("Failed to umount {}", src.as_ref().display()))?;
+    Ok(())
+}
+
+fn get_overlay_features() -> String {
+    let mut features = String::new();
+
+    if Path::new("/sys/module/overlay/parameters/redirect_dir").exists() {
+        features.push_str(",redirect_dir=on");
+    }
+
+    if Path::new("/sys/module/overlay/parameters/metacopy").exists() {
+        if !features.contains("redirect_dir") {
+            features.push_str(",redirect_dir=on");
+        }
+        features.push_str(",metacopy=on");
+    }
+
+    features
+}
+
+fn get_sub_mounts(parent: &str) -> Result<Vec<String>> {
+    let file = fs::File::open("/proc/mounts").context("Failed to open /proc/mounts")?;
+    let reader = BufReader::new(file);
+    let mut sub_mounts = Vec::new();
+
+    let parent_prefix = if parent.ends_with('/') {
+        parent.to_string()
+    } else {
+        format!("{}/", parent)
+    };
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 2 {
+            continue;
+        }
+        let mount_point = parts[1];
+
+        if mount_point.starts_with(&parent_prefix)
+            && mount_point != parent
+            && !mount_point.contains("hybrid_mount")
+        {
+            sub_mounts.push(mount_point.to_string());
+        }
+    }
+
+    sub_mounts.sort_by_key(|a| a.len());
+    Ok(sub_mounts)
+}
+
+pub fn mount_overlayfs(
     lower_dirs: &[String],
     lowest: &str,
-    upperdir: Option<&Path>,
-    workdir: Option<&Path>,
-    dest: &Path,
+    upperdir: Option<PathBuf>,
+    workdir: Option<PathBuf>,
+    dest: impl AsRef<Path>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
 ) -> Result<()> {
     let lowerdir_config = lower_dirs
         .iter()
-        .map(|s| s.as_str())
+        .map(|s| s.as_ref())
         .chain(std::iter::once(lowest))
         .collect::<Vec<_>>()
         .join(":");
 
-    debug!(
-        "mount overlayfs on {:?}, lowerdir={}, upperdir={:?}, workdir={:?}",
-        dest, lowerdir_config, upperdir, workdir
-    );
+    match do_mount_overlay(
+        &lowerdir_config,
+        upperdir.clone(),
+        workdir.clone(),
+        dest.as_ref(),
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        disable_umount,
+    ) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if lowerdir_config.len() >= PAGE_LIMIT {
+                if upperdir.is_some() || workdir.is_some() {
+                    return Err(e);
+                }
+                info!(
+                    "Direct overlay mount failed (possibly due to length limits), switching to staged mount. Error: {}",
+                    e
+                );
+                return mount_overlayfs_staged(
+                    lower_dirs,
+                    lowest,
+                    dest,
+                    #[cfg(any(target_os = "linux", target_os = "android"))]
+                    disable_umount,
+                );
+            }
+            Err(e)
+        }
+    }
+}
 
-    let mut data = format!("lowerdir={}", lowerdir_config);
-    if let (Some(u), Some(w)) = (upperdir, workdir) {
-        data = format!("{},upperdir={},workdir={}", data, u.display(), w.display());
+fn mount_overlayfs_staged(
+    lower_dirs: &[String],
+    lowest: &str,
+    dest: impl AsRef<Path>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+) -> Result<()> {
+    let mut batches: Vec<Vec<String>> = Vec::new();
+    let mut current_batch: Vec<String> = Vec::new();
+    let mut current_len = 0;
+    const SAFE_CHUNK_SIZE: usize = 3500;
+
+    for dir in lower_dirs {
+        if current_len + dir.len() + 1 > SAFE_CHUNK_SIZE {
+            batches.push(current_batch);
+            current_batch = Vec::new();
+            current_len = 0;
+        }
+        current_batch.push(dir.clone());
+        current_len += dir.len() + 1;
+    }
+    if !current_batch.is_empty() {
+        batches.push(current_batch);
     }
 
-    let data_c = CString::new(data).context("Failed to create CString for mount data")?;
+    let staging_root = Path::new(RUN_DIR).join("staging");
+    if !staging_root.exists() {
+        fs::create_dir_all(&staging_root).context("failed to create staging dir")?;
+    }
 
-    mount(
-        KSU_OVERLAY_SOURCE,
-        dest,
-        "overlay",
-        MountFlags::empty(),
-        Some(data_c.as_c_str()),
-    )
-    .with_context(|| format!("Legacy mount failed for {}", dest.display()))?;
+    let mut current_base = lowest.to_string();
+    let mut guard = StagedMountGuard {
+        mounts: Vec::new(),
+        committed: false,
+    };
+
+    for (i, batch) in batches.iter().rev().enumerate() {
+        let is_last_layer = i == batches.len() - 1;
+
+        let target_path = if is_last_layer {
+            dest.as_ref().to_path_buf()
+        } else {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .context("System time is before UNIX EPOCH")?
+                .as_nanos();
+
+            let stage_dir = staging_root.join(format!("stage_{}_{}", timestamp, i));
+            fs::create_dir_all(&stage_dir)
+                .with_context(|| format!("Failed to create stage dir {:?}", stage_dir))?;
+            stage_dir
+        };
+
+        let lowerdir_str = batch
+            .iter()
+            .map(|s| s.as_str())
+            .chain(std::iter::once(current_base.as_str()))
+            .collect::<Vec<_>>()
+            .join(":");
+
+        do_mount_overlay(
+            &lowerdir_str,
+            None,
+            None,
+            &target_path,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            disable_umount,
+        )?;
+
+        if !is_last_layer {
+            guard.mounts.push(target_path.clone());
+            current_base = target_path.to_string_lossy().to_string();
+        }
+    }
+
+    guard.committed = true;
+    Ok(())
+}
+
+fn do_mount_overlay(
+    lowerdir_config: &str,
+    upperdir: Option<PathBuf>,
+    workdir: Option<PathBuf>,
+    dest: impl AsRef<Path>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+) -> Result<()> {
+    let upperdir_s = upperdir
+        .filter(|up| up.exists())
+        .map(|e| e.display().to_string());
+    let workdir_s = workdir
+        .filter(|wd| wd.exists())
+        .map(|e| e.display().to_string());
+
+    let extra_features = get_overlay_features();
+
+    let result = (|| {
+        let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
+        let fs = fs.as_fd();
+
+        fsconfig_set_string(fs, "lowerdir", lowerdir_config)?;
+
+        if let (Some(upperdir), Some(workdir)) = (&upperdir_s, &workdir_s) {
+            fsconfig_set_string(fs, "upperdir", upperdir)?;
+            fsconfig_set_string(fs, "workdir", workdir)?;
+        }
+
+        if extra_features.contains("redirect_dir") {
+            let _ = fsconfig_set_string(fs, "redirect_dir", "on");
+        }
+        if extra_features.contains("metacopy") {
+            let _ = fsconfig_set_string(fs, "metacopy", "on");
+        }
+
+        fsconfig_set_string(fs, "source", KSU_OVERLAY_SOURCE)?;
+        fsconfig_create(fs)?;
+
+        let mount = fsmount(fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
+        move_mount(
+            mount.as_fd(),
+            "",
+            CWD,
+            dest.as_ref(),
+            MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
+        )
+    })();
+
+    if let Err(fsopen_err) = result {
+        let mut data = format!("lowerdir={lowerdir_config}");
+        if let (Some(upperdir), Some(workdir)) = (upperdir_s, workdir_s) {
+            data = format!("{data},upperdir={upperdir},workdir={workdir}");
+        }
+
+        data.push_str(&extra_features);
+
+        let data_c = CString::new(data).context("Invalid string for mount data")?;
+
+        mount(
+            KSU_OVERLAY_SOURCE,
+            dest.as_ref(),
+            "overlay",
+            MountFlags::empty(),
+            Some(data_c.as_c_str()),
+        )
+        .with_context(|| format!("Legacy mount failed (fsopen also failed: {})", fsopen_err))?;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if !disable_umount {
+        let _ = send_unmountable(dest.as_ref());
+    }
 
     Ok(())
 }
 
-pub fn bind_mount(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
-    debug!(
-        "bind mount {} -> {}",
-        from.as_ref().display(),
-        to.as_ref().display()
-    );
+fn do_bind_mount(
+    from: impl AsRef<Path>,
+    to: impl AsRef<Path>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+) -> Result<()> {
     let tree = open_tree(
         CWD,
         from.as_ref(),
-        OpenTreeFlags::CLOEXEC | OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
-    )?;
+        OpenTreeFlags::OPEN_TREE_CLOEXEC
+            | OpenTreeFlags::OPEN_TREE_CLONE
+            | OpenTreeFlags::AT_RECURSIVE,
+    )
+    .with_context(|| format!("open_tree failed for {}", from.as_ref().display()))?;
+
     move_mount(
         tree.as_fd(),
         "",
         CWD,
         to.as_ref(),
         MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
-    )?;
+    )
+    .with_context(|| format!("move_mount failed to {}", to.as_ref().display()))?;
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    if !disable_umount {
+        let _ = send_unmountable(to.as_ref());
+    }
     Ok(())
 }
 
-fn mount_overlay_on_path(
-    mount_point: &Path,
+pub fn bind_mount(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
+    do_bind_mount(
+        from,
+        to,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        false,
+    )
+}
+
+fn mount_overlay_child(
+    mount_point: &str,
     relative: &str,
     module_roots: &[String],
-    stock_root: &Path,
+    stock_fd: OwnedFd,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
 ) -> Result<()> {
-    if !module_roots
-        .iter()
-        .any(|lower| Path::new(&format!("{}{}", lower, relative)).exists())
-    {
+    let has_modification = module_roots.iter().any(|lower| {
+        let path = Path::new(lower).join(relative.trim_start_matches('/'));
+        path.exists()
+    });
+
+    if !has_modification {
+        move_mount(
+            stock_fd.as_fd(),
+            "",
+            CWD,
+            mount_point,
+            MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
+        )
+        .with_context(|| format!("move_mount failed to {}", mount_point))?;
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if !disable_umount {
+            let _ = send_unmountable(mount_point);
+        }
         return Ok(());
     }
 
-    let mut lower_dirs = Vec::new();
+    let mut lower_dirs: Vec<String> = vec![];
     for lower in module_roots {
-        let lower_dir = format!("{}{}", lower, relative);
-        let path = Path::new(&lower_dir);
-        if path.exists() {
-            lower_dirs.push(lower_dir);
+        let path = Path::new(lower).join(relative.trim_start_matches('/'));
+        if path.is_dir() {
+            lower_dirs.push(path.display().to_string());
+        } else if path.exists() {
+            return Ok(());
         }
     }
 
@@ -102,141 +368,117 @@ fn mount_overlay_on_path(
         return Ok(());
     }
 
+    let stock_root_magic_path = format!("/proc/self/fd/{}", stock_fd.as_raw_fd());
+
     if let Err(e) = mount_overlayfs(
         &lower_dirs,
-        stock_root.to_str().unwrap(),
+        &stock_root_magic_path,
         None,
         None,
         mount_point,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        disable_umount,
     ) {
         warn!(
-            "failed to mount overlay on {}: {:#}, fallback to bind",
-            mount_point.display(),
+            "failed to overlay child {mount_point}: {:#}, fallback to bind mount",
             e
         );
-        bind_mount(stock_root, mount_point)?;
+        move_mount(
+            stock_fd.as_fd(),
+            "",
+            CWD,
+            mount_point,
+            MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
+        )
+        .with_context(|| format!("move_mount failed to {}", mount_point))?;
+
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if !disable_umount {
+            let _ = send_unmountable(mount_point);
+        }
     }
     Ok(())
 }
 
 pub fn mount_overlay(
-    target: &str,
+    target_root: &str,
     module_roots: &[String],
-    _workdir: Option<PathBuf>,
-    _upperdir: Option<PathBuf>,
-    disable_umount: bool,
+    workdir: Option<PathBuf>,
+    upperdir: Option<PathBuf>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
 ) -> Result<()> {
-    info!("mount overlay for {} (subdirectory mode)", target);
+    let root_file = fs::File::open(target_root)
+        .with_context(|| format!("failed to open target root {}", target_root))?;
 
-    let process = Process::myself().context("failed to get self process")?;
-    let mount_infos = process.mountinfo().context("failed to get mountinfo")?;
-    let mount_points: HashSet<PathBuf> = mount_infos
-        .0
-        .iter()
-        .map(|m| m.mount_point.clone())
-        .collect();
+    let stock_root = format!("/proc/self/fd/{}", root_file.as_raw_fd());
 
-    std::env::set_current_dir(target).with_context(|| format!("failed to chdir to {}", target))?;
-
-    let entries = fs::read_dir(".").with_context(|| "failed to read target directory")?;
-
-    let exclusions = ["lost+found"];
-
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let file_name = entry.file_name();
-        let name_str = file_name.to_string_lossy();
-
-        if exclusions.iter().any(|&e| e == name_str) {
-            continue;
-        }
-
-        if let Ok(file_type) = entry.file_type() {
-            if !file_type.is_dir() {
-                continue;
+    // Auto-detect sub-mounts to preserve them (fix for linkerconfig crash)
+    let mut all_child_mounts = Vec::new();
+    match get_sub_mounts(target_root) {
+        Ok(sub_mounts) => {
+            if !sub_mounts.is_empty() {
+                info!(
+                    "Auto-detected sub-mounts under {}: {:?}",
+                    target_root, sub_mounts
+                );
             }
-            if file_type.is_symlink() {
-                continue;
-            }
-        } else {
-            continue;
+            all_child_mounts = sub_mounts;
         }
-
-        let target_path = Path::new(target).join(&*name_str);
-
-        if mount_points.contains(&target_path) {
-            debug!("Skipping mount point: {}", target_path.display());
-            continue;
-        }
-
-        let relative_path = format!("/{}", name_str);
-        let stock_root_path = Path::new(".").join(&*name_str);
-
-        if let Err(e) =
-            mount_overlay_on_path(&target_path, &relative_path, module_roots, &stock_root_path)
-        {
-            warn!("Failed to mount child {}: {}", target_path.display(), e);
+        Err(e) => {
+            warn!("Failed to detect sub-mounts: {}", e);
         }
     }
 
-    let mount_seq = mount_infos
-        .0
-        .iter()
-        .filter(|m| {
-            m.mount_point.starts_with(target) && !Path::new(target).starts_with(&m.mount_point)
-        })
-        .map(|m| m.mount_point.to_str());
+    let mut stashed_mounts = Vec::new();
+    for mount_point in &all_child_mounts {
+        let relative = mount_point.replacen(target_root, "", 1);
+        let relative_clean = relative.trim_start_matches('/');
 
-    let mut valid_mount_seq: Vec<&str> = mount_seq.flatten().collect();
-    valid_mount_seq.sort();
-    valid_mount_seq.dedup();
-
-    for mount_point in valid_mount_seq {
-        let relative: String = mount_point.replacen(target, "", 1);
-        let path_obj = Path::new(&relative);
-
-        if let Some(first_str) = path_obj
-            .components()
-            .next()
-            .and_then(|c| c.as_os_str().to_str())
-        {
-            let clean_name = first_str.trim_start_matches('/');
-            if exclusions.contains(&clean_name) {
-                continue;
-            }
-
-            let root_child = Path::new(target).join(clean_name);
-            if mount_points.contains(&root_child) {
-                continue;
-            }
+        match open_tree(
+            root_file.as_fd(),
+            relative_clean,
+            OpenTreeFlags::OPEN_TREE_CLOEXEC
+                | OpenTreeFlags::OPEN_TREE_CLONE
+                | OpenTreeFlags::AT_RECURSIVE,
+        ) {
+            Ok(fd) => stashed_mounts.push((mount_point.clone(), relative, fd)),
+            Err(e) => warn!("Failed to stash mount {}: {}", mount_point, e),
         }
+    }
 
-        let child_stock_root = format!(".{}", relative);
+    mount_overlayfs(
+        module_roots,
+        &stock_root,
+        upperdir,
+        workdir,
+        target_root,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        disable_umount,
+    )
+    .with_context(|| format!("mount overlayfs for root {target_root} failed"))?;
 
-        if !Path::new(&child_stock_root).exists() {
-            continue;
-        }
-
-        if let Err(e) = mount_overlay_on_path(
-            Path::new(mount_point),
+    for (mount_point, relative, stock_fd) in stashed_mounts {
+        if let Err(e) = mount_overlay_child(
+            &mount_point,
             &relative,
             module_roots,
-            Path::new(&child_stock_root),
+            stock_fd,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            disable_umount,
         ) {
             warn!(
-                "failed to mount overlay for child {}: {:#}, revert",
-                mount_point, e
+                "failed to restore child mount {mount_point}: {:#}, revert overlay on {}",
+                e, target_root
             );
-            if !disable_umount {
-                let _ = unmount(target, UnmountFlags::empty());
+            if let Err(umount_err) = umount_dir(target_root) {
+                log::error!(
+                    "CRITICAL: Failed to revert overlay on {}: {}",
+                    target_root,
+                    umount_err
+                );
             }
-            bail!(e);
+            bail!("Child mount restoration failed: {}", e);
         }
     }
-
     Ok(())
 }
