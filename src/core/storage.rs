@@ -15,6 +15,9 @@ use walkdir::WalkDir;
 
 use crate::{core::state::RuntimeState, defs, utils};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::utils::send_unmountable;
+
 const DEFAULT_SELINUX_CONTEXT: &str = "u:object_r:system_file:s0";
 const SELINUX_XATTR_KEY: &str = "security.selinux";
 
@@ -25,7 +28,7 @@ pub struct StorageHandle {
 }
 
 impl StorageHandle {
-    pub fn commit(&mut self) -> Result<()> {
+    pub fn commit(&mut self, disable_umount: bool) -> Result<()> {
         if self.mode == "erofs_staging" {
             let image_path = self
                 .backing_image
@@ -40,6 +43,11 @@ impl StorageHandle {
 
             utils::mount_erofs_image(image_path, &self.mount_point)
                 .context("Failed to mount finalized EROFS image")?;
+
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            if !disable_umount {
+                let _ = send_unmountable(&self.mount_point);
+            }
 
             self.mode = "erofs".to_string();
         }
@@ -80,15 +88,26 @@ pub fn setup(
     force_ext4: bool,
     use_erofs: bool,
     mount_source: &str,
+    disable_umount: bool,
 ) -> Result<StorageHandle> {
     if utils::is_mounted(mnt_base) {
         let _ = unmount(mnt_base, UnmountFlags::DETACH);
     }
 
+    let try_hide = |path: &Path| {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if !disable_umount {
+            let _ = send_unmountable(path);
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let _ = path;
+    };
+
     if use_erofs && utils::is_erofs_supported() {
         let erofs_path = img_path.with_extension("erofs");
 
         utils::mount_tmpfs(mnt_base, mount_source)?;
+        try_hide(mnt_base);
 
         if img_path.exists() {
             let _ = fs::remove_file(img_path);
@@ -102,10 +121,11 @@ pub fn setup(
     }
 
     if !force_ext4 && try_setup_tmpfs(mnt_base, mount_source)? {
-        if img_path.exists() {
-            if let Err(e) = fs::remove_file(img_path) {
-                log::warn!("Failed to remove unused modules.img: {}", e);
-            }
+        try_hide(mnt_base);
+        if img_path.exists()
+            && let Err(e) = fs::remove_file(img_path)
+        {
+            log::warn!("Failed to remove unused modules.img: {}", e);
         }
 
         let erofs_path = img_path.with_extension("erofs");
@@ -120,7 +140,9 @@ pub fn setup(
         });
     }
 
-    setup_ext4_image(mnt_base, img_path, moduledir)
+    let handle = setup_ext4_image(mnt_base, img_path, moduledir)?;
+    try_hide(mnt_base);
+    Ok(handle)
 }
 
 fn try_setup_tmpfs(target: &Path, mount_source: &str) -> Result<bool> {
