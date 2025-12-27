@@ -14,7 +14,7 @@ use std::{
 
 use rustix::{
     fd::AsFd,
-    fs::{CWD, XattrFlags, getxattr, setxattr},
+    fs::{CWD, XattrFlags, getxattr, setxattr, lgetxattr, lsetxattr},
     mount::*,
 };
 
@@ -115,15 +115,15 @@ fn clone_path_context(source: &Path, target: &Path) -> Result<()> {
 
     let name = "security.selinux";
 
-    match getxattr(source, name, &mut buf) {
+    match lgetxattr(source, name, &mut buf) {
         Ok(len) => {
-            let _ = setxattr(target, name, &buf[..len], XattrFlags::empty());
+            let _ = lsetxattr(target, name, &buf[..len], XattrFlags::empty());
         }
         Err(rustix::io::Errno::RANGE) => {
             let mut large_buf = vec![0u8; 1024];
 
-            if let Ok(len) = getxattr(source, name, &mut large_buf) {
-                let _ = setxattr(target, name, &large_buf[..len], XattrFlags::empty());
+            if let Ok(len) = lgetxattr(source, name, &mut large_buf) {
+                let _ = lsetxattr(target, name, &large_buf[..len], XattrFlags::empty());
             }
         }
         _ => {}
@@ -137,11 +137,7 @@ fn recursive_context_align(
     module_base: &Path,
     current_module_path: &Path,
 ) -> Result<()> {
-    if current_module_path.is_symlink() {
-        return Ok(());
-    }
-
-    if current_module_path.is_dir() {
+    if current_module_path.is_dir() && !current_module_path.is_symlink() {
         for entry in fs::read_dir(current_module_path)? {
             let entry = entry?;
 
@@ -150,7 +146,7 @@ fn recursive_context_align(
     } else if let Ok(relative) = current_module_path.strip_prefix(module_base) {
         let target_path = target_base.join(relative);
 
-        if target_path.exists() {
+        if target_path.exists() || target_path.is_symlink() {
             let _ = clone_path_context(&target_path, current_module_path);
         }
     }
@@ -318,6 +314,10 @@ fn do_mount_overlay(
     dest: impl AsRef<Path>,
     #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
 ) -> Result<()> {
+    let dest_path = dest.as_ref();
+    let mut root_context = vec![0u8; 256];
+    let root_context_len = lgetxattr(dest_path, "security.selinux", &mut root_context).ok();
+
     let upperdir_s = upperdir
         .filter(|up| up.exists())
         .map(|e| e.display().to_string());
@@ -359,7 +359,7 @@ fn do_mount_overlay(
             mount.as_fd(),
             "",
             CWD,
-            dest.as_ref(),
+            dest_path,
             MoveMountFlags::MOVE_MOUNT_F_EMPTY_PATH,
         )
     })();
@@ -377,7 +377,7 @@ fn do_mount_overlay(
 
         mount(
             KSU_OVERLAY_SOURCE,
-            dest.as_ref(),
+            dest_path,
             "overlay",
             MountFlags::empty(),
             Some(data_c.as_c_str()),
@@ -385,9 +385,18 @@ fn do_mount_overlay(
         .with_context(|| format!("Legacy mount failed (fsopen also failed: {})", fsopen_err))?;
     }
 
+    if let Some(len) = root_context_len {
+        let _ = lsetxattr(
+            dest_path,
+            "security.selinux",
+            &root_context[..len],
+            XattrFlags::empty(),
+        );
+    }
+
     #[cfg(any(target_os = "linux", target_os = "android"))]
     if !disable_umount {
-        let _ = send_unmountable(dest.as_ref());
+        let _ = send_unmountable(dest_path);
     }
 
     Ok(())
