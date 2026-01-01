@@ -217,6 +217,7 @@ pub fn execute(plan: &MountPlan, config: &config::Config) -> Result<ExecutionRes
 
     if !magic_queue.is_empty() {
         let tempdir = utils::select_temp_dir()?;
+        let _ = crate::try_umount::TMPFS.set(tempdir.to_string_lossy().to_string());
 
         for path in &magic_queue {
             if let Some(name) = path.file_name() {
