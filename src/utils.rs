@@ -203,6 +203,23 @@ fn copy_extended_attributes(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn set_overlay_opaque<P: AsRef<Path>>(path: P) -> Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        lsetxattr(
+            path.as_ref(),
+            OVERLAY_OPAQUE_XATTR,
+            b"y",
+            XattrFlags::empty(),
+        )?;
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    {
+        let _ = path;
+    }
+    Ok(())
+}
+
 pub fn lsetfilecon<P: AsRef<Path>>(path: P, con: &str) -> Result<()> {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {

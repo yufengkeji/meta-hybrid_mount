@@ -5,6 +5,7 @@ use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Result;
 use rayon::prelude::*;
+use walkdir::WalkDir;
 
 use crate::{
     core::inventory::{Module, MountMode},
@@ -42,12 +43,33 @@ pub fn perform_sync(modules: &[Module], target_base: &Path) -> Result<()> {
 
             if let Err(e) = utils::sync_dir(&module.source_path, &dst, true) {
                 log::error!("Failed to sync module {}: {}", module.id, e);
+            } else {
+                // Apply trusted.overlay.opaque xattrs if .replace files exist
+                if let Err(e) = apply_overlay_opaque_flags(&dst) {
+                    log::warn!(
+                        "Failed to apply overlay opaque xattrs for {}: {}",
+                        module.id,
+                        e
+                    );
+                }
             }
         } else {
             log::debug!("Skipping module: {}", module.id);
         }
     });
 
+    Ok(())
+}
+
+fn apply_overlay_opaque_flags(root: &Path) -> Result<()> {
+    for entry in WalkDir::new(root).min_depth(1).into_iter().flatten() {
+        if entry.file_type().is_file() && entry.file_name() == defs::REPLACE_DIR_FILE_NAME {
+            if let Some(parent) = entry.path().parent() {
+                utils::set_overlay_opaque(parent)?;
+                log::debug!("Set overlay opaque xattr on: {}", parent.display());
+            }
+        }
+    }
     Ok(())
 }
 

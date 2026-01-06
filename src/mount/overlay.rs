@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use log::{info, warn};
 use procfs::process::Process;
 use rustix::{fd::AsFd, fs::CWD, mount::*};
@@ -52,6 +52,7 @@ pub fn mount_overlayfs(
         .filter(|wd| wd.exists())
         .map(|e| e.display().to_string());
 
+    // Try New API (fsopen)
     let result = (|| {
         let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
         let fs = fs.as_fd();
@@ -72,6 +73,7 @@ pub fn mount_overlayfs(
         )
     })();
 
+    // Fallback to Old API (mount)
     if let Err(e) = result {
         warn!("fsopen mount failed: {e:#}, fallback to mount");
         let mut data = format!("lowerdir={lowerdir_config}");
@@ -125,6 +127,20 @@ fn bind_mount_at(
     Ok(())
 }
 
+pub fn bind_mount(
+    from: impl AsRef<Path>,
+    to: impl AsRef<Path>,
+    #[cfg(any(target_os = "linux", target_os = "android"))] disable_umount: bool,
+) -> Result<()> {
+    bind_mount_at(
+        CWD,
+        from,
+        to,
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        disable_umount,
+    )
+}
+
 pub fn mount_overlay(
     root: &str,
     module_roots: &[String],
@@ -141,6 +157,7 @@ pub fn mount_overlay(
 
     let root_fd = File::open(root).with_context(|| format!("failed to open root {root}"))?;
 
+    // collect child mounts before mounting the root
     let mounts = Process::myself()?
         .mountinfo()
         .with_context(|| "get mountinfo")?;
@@ -166,6 +183,8 @@ pub fn mount_overlay(
     )
     .with_context(|| "mount overlayfs for root failed")?;
 
+    let mut failed_restores = Vec::new();
+
     // Handle child mounts (nested mounts)
     for mount_point in mount_seq.iter() {
         let Some(mount_point) = mount_point else {
@@ -184,8 +203,23 @@ pub fn mount_overlay(
             disable_umount,
         ) {
             warn!("failed to restore child mount {mount_point}: {e:#}");
+            failed_restores.push(mount_point);
         }
     }
+
+    if !failed_restores.is_empty() {
+        warn!(
+            "Critical: Failed to restore {} child mounts. Rolling back overlay.",
+            failed_restores.len()
+        );
+
+        if let Err(e) = umount_dir(root) {
+            warn!("Rollback failed for {}: {}", root, e);
+        }
+
+        bail!("Failed to restore child mounts, overlay rolled back.");
+    }
+
     Ok(())
 }
 
