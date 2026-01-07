@@ -1,4 +1,4 @@
-# Meta-Hybrid Mount
+# Hybrid Mount
 
 <img src="https://raw.githubusercontent.com/YuzakiKokuban/meta-hybrid_mount/master/icon.svg" align="right" width="120" />
 
@@ -7,7 +7,7 @@
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
 [![Telegram](https://img.shields.io/badge/Telegram-@hybridmountchat-2CA5E0?style=flat-square&logo=telegram)](https://t.me/hybridmountchat)
 
-**Meta-Hybrid Mount** is a next-generation hybrid mount metamodule designed for KernelSU and APatch. Written in native Rust, it orchestrates multiple mounting strategies— **OverlayFS** and **Magic Mount**—to provide the ultimate module management experience with superior performance, stability, and stealth.
+**Hybrid Mount** is a next-generation hybrid mount metamodule designed for KernelSU and APatch. Written in native Rust, it orchestrates multiple mounting strategies— **OverlayFS** and **Magic Mount**—to provide the ultimate module management experience with superior performance, stability, and stealth.
 
 This project features a modern WebUI built with Svelte, offering real-time status monitoring, granular module configuration, and log inspection.
 
