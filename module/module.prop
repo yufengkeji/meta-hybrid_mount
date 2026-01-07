@@ -1,8 +1,8 @@
 id=meta-hybrid
 metamodule=1
 name=Hybrid Mount
-version=v2.0.2
-versionCode=114
+version=v2.0.21
+versionCode=115
 author=Hybrid Mount Developers
 updateJson=https://raw.githubusercontent.com/YuzakiKokuban/meta-hybrid_mount/master/update.json
 description=Waiting for daemon...
