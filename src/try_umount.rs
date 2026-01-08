@@ -3,7 +3,7 @@ use std::{
     sync::{LazyLock, Mutex, OnceLock},
 };
 
-use anyhow::{Result, bail};
+use anyhow::{Result};
 use ksu::{NukeExt4Sysfs, TryUmount};
 
 pub static TMPFS: OnceLock<String> = OnceLock::new();
