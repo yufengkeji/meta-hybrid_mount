@@ -1,6 +1,5 @@
 // Copyright 2025 Meta-Hybrid Mount Authors
 // SPDX-License-Identifier: GPL-3.0-or-later
-
 mod conf;
 mod core;
 mod defs;
@@ -88,10 +87,32 @@ fn main() -> Result<()> {
         cli.dry_run,
     );
 
-    if !config.dry_run
-        && let Err(e) = granary::engage_ratoon_protocol()
-    {
-        tracing::error!("Failed to engage Ratoon Protocol: {}", e);
+    if !config.dry_run {
+        match granary::engage_ratoon_protocol() {
+            Ok(granary::RatoonStatus::Restored) => {
+                tracing::warn!(">> Config restored by Ratoon Protocol. Reloading...");
+                match load_config(&cli) {
+                    Ok(new_config) => {
+                        config = new_config;
+                        config.merge_with_cli(
+                            cli.moduledir.clone(),
+                            cli.mountsource.clone(),
+                            cli.verbose,
+                            cli.partitions.clone(),
+                            cli.dry_run,
+                        );
+                        tracing::info!(">> Config reloaded successfully.");
+                    }
+                    Err(e) => {
+                        tracing::error!(">> Failed to reload config after restore: {}", e);
+                    }
+                }
+            }
+            Ok(granary::RatoonStatus::Standby) => {}
+            Err(e) => {
+                tracing::error!("Failed to engage Ratoon Protocol: {}", e);
+            }
+        }
     }
 
     if utils::check_zygisksu_enforce_status() {

@@ -1,6 +1,3 @@
-// Copyright 2025 Meta-Hybrid Mount Authors
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 mod utils;
 
 use std::{
@@ -27,8 +24,8 @@ use crate::{
     utils::ensure_dir_exists,
 };
 
-static MOUNTDED_FILES: AtomicU32 = AtomicU32::new(0);
-static MOUNTDED_SYMBOLS_FILES: AtomicU32 = AtomicU32::new(0);
+static MOUNTED_FILES: AtomicU32 = AtomicU32::new(0);
+static MOUNTED_SYMBOLS_FILES: AtomicU32 = AtomicU32::new(0);
 
 struct MagicMount {
     node: Node,
@@ -88,8 +85,8 @@ impl MagicMount {
                     self.work_dir_path.display(),
                 )
             })?;
-            let mounted = MOUNTDED_SYMBOLS_FILES.load(std::sync::atomic::Ordering::Relaxed) + 1;
-            MOUNTDED_SYMBOLS_FILES.store(mounted, std::sync::atomic::Ordering::Relaxed);
+            let mounted = MOUNTED_SYMBOLS_FILES.load(std::sync::atomic::Ordering::Relaxed) + 1;
+            MOUNTED_SYMBOLS_FILES.store(mounted, std::sync::atomic::Ordering::Relaxed);
             Ok(())
         } else {
             bail!("cannot mount root symlink {}!", self.path.display());
@@ -132,8 +129,8 @@ impl MagicMount {
             tracing::warn!("make file {} ro: {e:#?}", target.display());
         }
 
-        let mounted = MOUNTDED_FILES.load(std::sync::atomic::Ordering::Relaxed) + 1;
-        MOUNTDED_FILES.store(mounted, std::sync::atomic::Ordering::Relaxed);
+        let mounted = MOUNTED_FILES.load(std::sync::atomic::Ordering::Relaxed) + 1;
+        MOUNTED_FILES.store(mounted, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 
@@ -345,8 +342,8 @@ where
         try_umount::commit()?;
         fs::remove_dir(tmp_dir).ok();
 
-        let mounted_symbols = MOUNTDED_SYMBOLS_FILES.load(std::sync::atomic::Ordering::Relaxed);
-        let mounted_files = MOUNTDED_FILES.load(std::sync::atomic::Ordering::Relaxed);
+        let mounted_symbols = MOUNTED_SYMBOLS_FILES.load(std::sync::atomic::Ordering::Relaxed);
+        let mounted_files = MOUNTED_FILES.load(std::sync::atomic::Ordering::Relaxed);
         tracing::info!("mounted files: {mounted_files}, mounted symlinks: {mounted_symbols}");
         ret
     } else {

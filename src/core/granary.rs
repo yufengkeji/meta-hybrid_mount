@@ -26,13 +26,18 @@ pub struct Silo {
     pub raw_state: Option<String>,
 }
 
+pub enum RatoonStatus {
+    Standby,
+    Restored,
+}
+
 const RATOON_COUNTER_FILE: &str = "/data/adb/meta-hybrid/ratoon_counter";
 
 const RATOON_RESCUE_NOTICE: &str = "/data/adb/meta-hybrid/rescue_notice";
 
 const GRANARY_DIR: &str = "/data/adb/meta-hybrid/granary";
 
-pub fn engage_ratoon_protocol() -> Result<()> {
+pub fn engage_ratoon_protocol() -> Result<RatoonStatus> {
     let path = Path::new(RATOON_COUNTER_FILE);
 
     let mut count = 0;
@@ -45,7 +50,6 @@ pub fn engage_ratoon_protocol() -> Result<()> {
 
     count += 1;
 
-    // Use explicit file operations to ensure persistence against kernel panic
     {
         let mut file =
             fs::File::create(path).context("Failed to open Ratoon counter for writing")?;
@@ -69,7 +73,6 @@ pub fn engage_ratoon_protocol() -> Result<()> {
 
                 let _ = fs::remove_file(path);
 
-                // Write notice for WebUI/User
                 let notice = format!(
                     "System recovered from bootloop by restoring snapshot: {}",
                     silo_id
@@ -78,6 +81,8 @@ pub fn engage_ratoon_protocol() -> Result<()> {
                 if let Err(e) = fs::write(RATOON_RESCUE_NOTICE, notice) {
                     tracing::warn!("Failed to write rescue notice: {}", e);
                 }
+
+                return Ok(RatoonStatus::Restored);
             }
             Err(e) => {
                 tracing::error!(
@@ -87,13 +92,12 @@ pub fn engage_ratoon_protocol() -> Result<()> {
 
                 disable_all_modules()?;
 
-                // Also reset counter to avoid infinite loop of failing restores
                 let _ = fs::remove_file(path);
             }
         }
     }
 
-    Ok(())
+    Ok(RatoonStatus::Standby)
 }
 
 pub fn disengage_ratoon_protocol() {

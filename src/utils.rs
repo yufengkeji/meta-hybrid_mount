@@ -1,6 +1,3 @@
-// Copyright 2025 Meta-Hybrid Mount Authors
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 use std::{
     ffi::CString,
     fmt as std_fmt,
@@ -130,10 +127,8 @@ pub fn init_logging(
             None
         };
 
-        // Initialize registry with file layer first
         let registry = registry.with(file_layer);
 
-        // Apply Android layer conditionally to avoid type inference issues
         #[cfg(target_os = "android")]
         {
             let android_layer = tracing_android::layer("HybridMount").ok();
@@ -633,6 +628,8 @@ pub fn create_erofs_image(src_dir: &Path, image_path: &Path) -> Result<()> {
     let output = Command::new(cmd_name)
         .arg("-z")
         .arg("lz4hc")
+        .arg("-x")
+        .arg("256")
         .arg(image_path)
         .arg(src_dir)
         .stdout(Stdio::piped())
