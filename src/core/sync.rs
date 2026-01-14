@@ -1,6 +1,3 @@
-// Copyright 2025 Meta-Hybrid Mount Authors
-// SPDX-License-Identifier: GPL-3.0-or-later
-
 use std::{collections::HashSet, fs, path::Path};
 
 use anyhow::Result;
@@ -35,7 +32,10 @@ pub fn perform_sync(modules: &[Module], target_base: &Path) -> Result<()> {
             if let Err(e) = utils::sync_dir(&module.source_path, &dst, true) {
                 tracing::error!("Failed to sync module {}: {}", module.id, e);
             } else {
-                // Apply trusted.overlay.opaque xattrs if .replace files exist
+                if let Err(e) = utils::prune_empty_dirs(&dst) {
+                    tracing::warn!("Failed to prune empty dirs for {}: {}", module.id, e);
+                }
+
                 if let Err(e) = apply_overlay_opaque_flags(&dst) {
                     tracing::warn!(
                         "Failed to apply overlay opaque xattrs for {}: {}",

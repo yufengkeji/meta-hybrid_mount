@@ -31,6 +31,7 @@ use tracing_subscriber::{
     registry::LookupSpan,
     util::SubscriberInitExt,
 };
+use walkdir::WalkDir;
 
 const SELINUX_XATTR: &str = "security.selinux";
 const OVERLAY_OPAQUE_XATTR: &str = "trusted.overlay.opaque";
@@ -699,4 +700,28 @@ pub fn extract_module_id(path: &Path) -> Option<String> {
     path.parent()
         .and_then(|p| p.file_name())
         .map(|s| s.to_string_lossy().to_string())
+}
+
+pub fn prune_empty_dirs<P: AsRef<Path>>(root: P) -> Result<()> {
+    let root = root.as_ref();
+    if !root.exists() {
+        return Ok(());
+    }
+
+    for entry in WalkDir::new(root)
+        .min_depth(1)
+        .contents_first(true)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if entry.file_type().is_dir() {
+            let path = entry.path();
+            if let Err(e) = fs::remove_dir(path) {
+                tracing::debug!("Keeping dir (not empty): {} [{}]", path.display(), e);
+            } else {
+                tracing::debug!("Pruned empty dir: {}", path.display());
+            }
+        }
+    }
+    Ok(())
 }
