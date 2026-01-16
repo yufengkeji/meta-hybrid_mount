@@ -32,9 +32,9 @@ enum Arch {
 impl Arch {
     fn target(&self) -> &'static str {
         match self {
-            Arch::Arm64 => "aarch64-linux-android",
-            Arch::Arm => "armv7-linux-androideabi",
-            Arch::X86_64 => "x86_64-linux-android",
+            Arch::Arm64 => "arm64-v8a",
+            Arch::Arm => "armeabi-v7a",
+            Arch::X86_64 => "x86_64",
         }
     }
     fn android_abi(&self) -> &'static str {
@@ -76,7 +76,6 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let root = project_root();
     match cli.command {
         Commands::Build {
             release,
@@ -85,30 +84,21 @@ fn main() -> Result<()> {
             key_enc,
             cert,
         } => {
-            build_full(&root, release, skip_webui, arch, &key_enc, &cert)?;
+            build_full(release, skip_webui, arch, &key_enc, &cert)?;
         }
         Commands::Lint => {
-            run_clippy(&root)?;
+            run_clippy()?;
         }
     }
     Ok(())
 }
 
-fn project_root() -> PathBuf {
-    Path::new(&env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(1)
-        .unwrap()
-        .to_path_buf()
-}
-
-fn run_clippy(root: &Path) -> Result<()> {
+fn run_clippy() -> Result<()> {
     println!(":: Running Clippy...");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
 
     let status = Command::new(cargo)
-        .current_dir(root)
         .args([
             "clippy",
             "--workspace",
@@ -130,23 +120,22 @@ fn run_clippy(root: &Path) -> Result<()> {
 }
 
 fn build_full(
-    root: &Path,
     release: bool,
     skip_webui: bool,
     target_arch: Option<Arch>,
     key_enc_path: &Path,
     cert_path: &Path,
 ) -> Result<()> {
-    let output_dir = root.join("output");
+    let output_dir = Path::new("output");
     let stage_dir = output_dir.join("staging");
     if output_dir.exists() {
         fs::remove_dir_all(&output_dir)?;
     }
     fs::create_dir_all(&stage_dir)?;
-    let version = get_version(root)?;
+    let version = get_version()?;
     if !skip_webui {
         println!(":: Building WebUI...");
-        build_webui(root, &version)?;
+        build_webui(&version)?;
     }
 
     let archs_to_build = if let Some(selected) = target_arch {
@@ -157,11 +146,10 @@ fn build_full(
 
     for arch in archs_to_build {
         println!(":: Compiling Core for {:?}...", arch);
-        compile_core(root, release, arch)?;
+        compile_core(release, arch)?;
         let bin_name = "meta-hybrid";
         let profile = if release { "release" } else { "debug" };
-        let src_bin = root
-            .join("target")
+        let src_bin = Path::new("target")
             .join(arch.target())
             .join(profile)
             .join(bin_name);
@@ -178,7 +166,7 @@ fn build_full(
         }
     }
     println!(":: Copying module scripts...");
-    let module_src = root.join("module");
+    let module_src = Path::new("module");
     let options = dir::CopyOptions::new().overwrite(true).content_only(true);
     dir::copy(&module_src, &stage_dir, &options)?;
     let gitignore = stage_dir.join(".gitignore");
@@ -197,8 +185,8 @@ fn build_full(
     if let Ok(password) = env::var("META_HYBRID_SIGN_PASSWORD")
         && !password.is_empty()
     {
-        let abs_key_enc = root.join(key_enc_path);
-        let abs_cert = root.join(cert_path);
+        let abs_key_enc = key_enc_path;
+        let abs_cert = cert_path;
 
         if abs_key_enc.exists() && abs_cert.exists() {
             decrypt_and_sign(&zip_file, &abs_key_enc, &abs_cert, &password)?;
@@ -263,9 +251,9 @@ fn decrypt_and_sign(
     Ok(())
 }
 
-fn build_webui(root: &Path, version: &str) -> Result<()> {
-    generate_webui_constants(root, version)?;
-    let webui_dir = root.join("webui");
+fn build_webui(version: &str) -> Result<()> {
+    generate_webui_constants(version)?;
+    let webui_dir = Path::new("webui");
     let npm = if cfg!(windows) { "npm.cmd" } else { "npm" };
     let status = Command::new(npm)
         .current_dir(&webui_dir)
@@ -284,8 +272,8 @@ fn build_webui(root: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
-fn generate_webui_constants(root: &Path, version: &str) -> Result<()> {
-    let path = root.join("webui/src/lib/constants_gen.ts");
+fn generate_webui_constants(version: &str) -> Result<()> {
+    let path = Path::new("webui/src/lib/constants_gen.ts");
     let content = format!(
         r#"
 export const APP_VERSION = "{version}";
@@ -303,63 +291,40 @@ export const BUILTIN_PARTITIONS = ["system", "vendor", "product", "system_ext", 
         fs::create_dir_all(parent)?;
     }
     fs::write(path, content)?;
-    let old_path = root.join("webui/src/lib/constants_gen.js");
+    let old_path = Path::new("webui/src/lib/constants_gen.js");
     if old_path.exists() {
         let _ = fs::remove_file(old_path);
     }
     Ok(())
 }
 
-fn compile_core(root: &Path, release: bool, arch: Arch) -> Result<()> {
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
-    let ndk_home = env::var("ANDROID_NDK_HOME").context("ANDROID_NDK_HOME not set")?;
-    let host_os = std::env::consts::OS;
-    let host_tag = match host_os {
-        "linux" => "linux-x86_64",
-        "macos" => "darwin-x86_64",
-        "windows" => "windows-x86_64",
-        _ => panic!("Unsupported OS"),
-    };
-    let toolchain_bin = PathBuf::from(ndk_home)
-        .join("toolchains/llvm/prebuilt")
-        .join(host_tag)
-        .join("bin");
-    let api = 35;
-    let cc_name = match arch {
-        Arch::Arm64 => format!("aarch64-linux-android{}-clang", api),
-        Arch::Arm => format!("armv7a-linux-androideabi{}-clang", api),
-        Arch::X86_64 => format!("x86_64-linux-android{}-clang", api),
-    };
-    let cc_path = toolchain_bin.join(&cc_name);
-    let ar_path = toolchain_bin.join("llvm-ar");
-    if !cc_path.exists() {
-        anyhow::bail!("Compiler not found: {}", cc_path.display());
-    }
-    let mut cmd = Command::new(&cargo);
-    cmd.current_dir(root);
-    cmd.arg("build").arg("--target").arg(arch.target());
+fn compile_core(release: bool, arch: Arch) -> Result<()> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(&[
+        "ndk",
+        "--platform",
+        "31",
+        "-t",
+        arch.target(),
+        "build",
+        "-Z",
+        "build-std",
+        "-Z",
+        "trim-paths",
+    ])
+    .env("RUSTFLAGS", "-C default-linker-libraries");
     if release {
-        cmd.arg("--release");
+        cmd.arg("-r");
     }
-    let path_val = env::var("PATH").unwrap_or_default();
-    cmd.env("PATH", format!("{}:{}", toolchain_bin.display(), path_val));
-    let env_target = arch.target().replace('-', "_");
-    cmd.env(format!("CC_{}", env_target), &cc_path);
-    cmd.env(format!("AR_{}", env_target), &ar_path);
-    cmd.env("CC", &cc_path);
-    cmd.env("AR", &ar_path);
-    cmd.env(
-        format!("CARGO_TARGET_{}_LINKER", env_target.to_uppercase()),
-        &cc_path,
-    );
-    let status = cmd.status()?;
+    let mut ret = cmd.spawn()?;
+    let status = ret.wait()?;
     if !status.success() {
         anyhow::bail!("Compilation failed for {}", arch.target());
     }
     Ok(())
 }
 
-fn get_version(root: &Path) -> Result<String> {
+fn get_version() -> Result<String> {
     if let Ok(v) = env::var("META_HYBRID_VERSION")
         && !v.is_empty()
     {
@@ -373,7 +338,7 @@ fn get_version(root: &Path) -> Result<String> {
     {
         return Ok(String::from_utf8(o.stdout)?.trim().to_string());
     }
-    let toml_path = root.join("module/config.toml");
+    let toml_path = Path::new("module/config.toml");
     if toml_path.exists() {
         let content = fs::read_to_string(toml_path)?;
         for line in content.lines() {

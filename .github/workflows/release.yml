@@ -84,7 +84,7 @@ jobs:
           META_HYBRID_SIGN_KEY: ${{ secrets.SIGNING_KEY }}
           META_HYBRID_SIGN_CERT: ${{ secrets.SIGNING_CERT }}
         run: |
-          cargo run -p xtask -- build --release
+          cargo xtask build --release
 
       - name: Notify Telegram (Release)
         env:
