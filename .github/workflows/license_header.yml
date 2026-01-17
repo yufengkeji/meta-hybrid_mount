@@ -18,7 +18,7 @@ jobs:
 
       - name: Run addlicense
         run: |
-          ~/go/bin/addlicense -v -c "Hybrid Mount Authors" -s -l GPL-3.0-or-later -y 2026 src xtask webui tools
+          ~/go/bin/addlicense -v -c "Hybrid Mount Developers" -s -l GPL-3.0-or-later -y 2026 src xtask webui tools
 
       - name: Check for changes
         id: git-check
