@@ -1,10 +1,7 @@
-## v2.1.0
+## v2.1.2
 
-Changes since v2.0.72:
-* fix: improve log formatting for conflict details in main function
-* workflow: fix lint permission
-* refactor: remove 'logs' tab from visible tabs and update icon description
-* refactor: remove LogsTab from webui
-* Enhance Telegram notification condition in CI (#137)
-* fix: trying fix magic mount scan (#121)
-* chore(release): bump version to v2.0.72 [skip ci]
+Changes since v2.1.1:
+* fix(customize.sh): correct architecture handling for arm
+* fix: resolve clippy warnings and armv7 compilation errors
+* refactor(executor): simplify execution logic with accumulator pattern
+* chore: update license headers [skip ci]
