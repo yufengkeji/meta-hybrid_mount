@@ -5,106 +5,82 @@
 ![Language](https://img.shields.io/badge/Language-Rust-orange?style=flat-square&logo=rust)
 ![Platform](https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
-[![Telegram](https://img.shields.io/badge/Telegram-@hybridmountchat-2CA5E0?style=flat-square&logo=telegram)](https://t.me/hybridmountchat)
 
-**Hybrid Mount** is a next-generation hybrid mount metamodule designed for KernelSU and APatch. Written in native Rust, it orchestrates multiple mounting strategies— **OverlayFS** and **Magic Mount**—to provide the ultimate module management experience with superior performance, stability, and stealth.
+**Hybrid Mount** is a mount logic metamodule implementation for KernelSU and APatch. It manages module file integration into the Android system using a combination of **OverlayFS** and **bind mounts** (Magic Mount).
 
-This project features a modern WebUI built with Svelte, offering real-time status monitoring, granular module configuration, and log inspection.
+The project includes a WebUI dashboard for module management and configuration.
 
-**[🇨🇳 中文 (Chinese)](https://github.com/YuzakiKokuban/meta-hybrid_mount/blob/master/README_ZH.md)**
-
----
-
-## ✨ Core Features
-
-### 🚀 Dual Hybrid Engine
-
-Meta-Hybrid intelligently selects the best mounting strategy for each module:
-
-1. **OverlayFS**: Efficient filesystem merging technology that delivers excellent I/O performance.
-2. **Magic Mount**: A reliable fallback mechanism used when other methods are unavailable, ensuring maximum compatibility.
-
-### 🛡️ Diagnostics & Safety
-
-* **Conflict Monitor**: Detects file path conflicts between modules, helping you resolve overrides effectively.
-* **System Health**: Built-in diagnostics to identify dead symlinks, invalid mount points, and potential bootloop risks.
-* **Smart Sync**: Only synchronizes changed modules by comparing `module.prop` checksums, drastically reducing boot time.
-
-### 🔧 Advanced Control
-
-* **Dynamic TempDir**: Automatically utilizes existing empty system directories (e.g., `/debug_ramdisk`) as temporary mount points to minimize traces on `/data`.
-* **Umount Strategies**: Configurable unmount behaviors to support complex environments (e.g., ZygiskSU coexistence).
+**[🇨🇳 中文 (Chinese)](README_ZH.md)**
 
 ---
 
-## ⚙️ Configuration
+## Technical Overview
 
-The configuration file is located at `/data/adb/meta-hybrid/config.toml`. You can edit it manually or via the WebUI.
+### Mounting Strategies
 
-| Key | Type | Default | Description |
+The core binary (`meta-hybrid`) determines the mounting method for each module directory based on configuration and system compatibility:
+
+1.  **OverlayFS**: Uses the kernel's OverlayFS to merge module directories with system partitions. This is the default strategy for supported filesystems.
+2.  **Magic Mount**: Uses recursive bind mounts to mirror modified file structures. This serves as a fallback strategy when OverlayFS is unavailable or fails.
+
+### Functionality
+
+* **Conflict Detection**: Scans module file paths to identify collisions where multiple modules modify the same file.
+* **Module Isolation**: Supports mounting modules in isolated namespaces.
+* **Configurable Strategies**: Users can force specific partitions or modules to use OverlayFS or Magic Mount via `config.toml`.
+* **Recovery Protocol**: Includes a mechanism to restore default configurations in case of boot failures caused by invalid settings.
+
+---
+
+## Configuration
+
+Configuration is stored at `/data/adb/meta-hybrid/config.toml`.
+
+| Parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `moduledir` | string | `/data/adb/modules/` | Directory where modules are installed. |
-| `mountsource` | string | `KSU` | Identify the mount source type. |
-| `partitions` | list | `[]` | Specific partitions to mount (empty = auto-detect). |
-| `enable_nuke` | bool | `false` | Enable aggressive cleanup mode. |
-| `force_ext4` | bool | `false` | Force creation of ext4 images for loop devices. |
-| `disable_umount` | bool | `false` | Disable unmounting (for troubleshooting). |
-| `allow_umount_coexistence` | bool | `false` | Allow coexistence with other unmount solutions. |
-| `dry_run` | bool | `false` | Simulate operations without making changes. |
-| `verbose` | bool | `false` | Enable detailed logging. |
+| `moduledir` | string | `/data/adb/modules/` | Path to the module source directory. |
+| `mountsource` | string | Auto-detect | Mount source label (e.g., `KSU`, `APatch`). |
+| `partitions` | list | `[]` | List of partitions to explicitly manage. |
+| `overlay_mode` | string | `tmpfs` | Backend for loop devices (`tmpfs`, `ext4`, `erofs`). |
+| `disable_umount` | bool | `false` | If true, skips unmounting the original source (debug usage). |
+| `backup` | object | `{}` | Settings for boot snapshot retention. |
 
 ---
 
-## 🖥️ WebUI
+## WebUI
 
-Access the WebUI (via **KernelSU Manager** or browser) to:
+The project provides a web-based interface built with **SolidJS**.
 
-* **Dashboard**: Monitor storage and kernel version.
-* **Modules**: Toggle mount modes (Overlay/Magic) per module and view file conflicts.
-* **Config**: Visually edit `config.toml` parameters.
-* **Logs**: Stream the daemon logs in real-time.
+* **Status**: View current storage usage and kernel version.
+* **Management**: Toggle mount modes per module.
 
 ---
 
-## 🔨 Build Guide
+## Build Instructions
 
-This project uses Rust's `xtask` pattern for a unified build process.
+The project uses `xtask` for build automation.
 
-### Requirements
+### Prerequisites
 
-* **Rust**: Nightly toolchain (via `rustup`)
-* **Android NDK**: Version r27+
-* **Node.js**: v20+ (for WebUI)
-* **Java**: JDK 17 (for environment)
+* **Rust**: Nightly toolchain.
+* **Android NDK**: r27 or newer.
+* **Node.js**: v20+ (Required for WebUI compilation).
 
-### Build Commands
+### Compilation
 
-1. **Clone Repository**
-
-    ```bash
-    git clone --recursive [https://github.com/YuzakiKokuban/meta-hybrid_mount.git](https://github.com/YuzakiKokuban/meta-hybrid_mount.git)
-    cd meta-hybrid_mount
-    ```
-
-2. **Full Build (Release)**
-    Compiles WebUI, Rust binaries (arm64, x64, riscv64), and packages the ZIP:
-
+1.  **Full Build (Binary + WebUI)**:
     ```bash
     cargo run -p xtask -- build --release
     ```
+    Output will be generated in the `output/` directory.
 
-    Artifacts will be in `output/`.
-
-3. **Binary Only**
-    Skip WebUI build for faster iteration on Rust code:
-
+2.  **Binary Only**:
     ```bash
     cargo run -p xtask -- build --release --skip-webui
     ```
 
 ---
 
-## 🤝 Contributions & Credits
+## License
 
-* Thanks to all contributors in the open-source community.
-* **License**: This project is licensed under the [GPL-3.0 License](https://github.com/YuzakiKokuban/meta-hybrid_mount/blob/master/LICENSE).
+This project is licensed under the [GPL-3.0 License](LICENSE).

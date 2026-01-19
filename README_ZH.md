@@ -5,106 +5,82 @@
 ![Language](https://img.shields.io/badge/Language-Rust-orange?style=flat-square&logo=rust)
 ![Platform](https://img.shields.io/badge/Platform-Android-green?style=flat-square&logo=android)
 ![License](https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square)
-[![Telegram](https://img.shields.io/badge/Telegram-@hybridmountchat-2CA5E0?style=flat-square&logo=telegram)](https://t.me/hybridmountchat)
 
-**Hybrid Mount** 是专为 KernelSU 和 APatch 设计的下一代混合挂载元模块。它采用原生 Rust 编写，通过智能调度 **OverlayFS** 和 **Magic Mount** 两种挂载策略，为您提供性能卓越、稳定且高度隐蔽的模块管理体验。
+**Hybrid Mount** 是 KernelSU 和 APatch 的挂载逻辑元模块实现。它结合 **OverlayFS** 和 **Bind Mounts** (Magic Mount) 将模块文件集成到 Android 系统中。
 
-本项目包含一个基于 Svelte 构建的现代化 WebUI，支持实时状态监控、精细化模块配置以及日志查看。
+本项目包含一个基于 **SolidJS** 构建的 WebUI 面板，用于模块管理和配置。
 
-**[🇺🇸 English](https://github.com/YuzakiKokuban/meta-hybrid_mount/blob/master/README.md)**
-
----
-
-## ✨ 核心特性
-
-### 🚀 双重混合引擎 (Dual Engine)
-
-Meta-Hybrid 能够为每个模块智能选择最佳挂载方案：
-
-1. **OverlayFS**：高效的文件系统合并技术，提供最佳的 I/O 读写性能。
-2. **Magic Mount**：经典的挂载机制，作为高兼容性的回退方案，确保在任何环境下均可工作。
-
-### 🛡️ 智能诊断与安全
-
-* **冲突监测**：自动检测不同模块间的文件路径冲突，明确展示覆盖关系。
-* **系统健康**：内置诊断工具，识别死链 (Dead Symlinks)、无效挂载点及潜在的 Bootloop 风险。
-* **极速同步**：守护进程通过对比 `module.prop` 校验和，仅同步变更的模块，大幅缩短开机耗时。
-
-### 🔧 高级控制
-
-* **动态临时目录**：自动复用系统现有的空目录（如 `/debug_ramdisk`）作为挂载点，减少 `/data` 分区痕迹。
-* **卸载控制**：支持禁用卸载或与 ZygiskSU 等共存的复杂挂载场景。
+**[🇺🇸 English](README.md)**
 
 ---
 
-## ⚙️ 配置文件
+## 技术概览
 
-配置文件位于 `/data/adb/meta-hybrid/config.toml`，支持手动编辑或通过 WebUI 修改。
+### 挂载策略
 
-| 键名 (Key) | 类型 | 默认值 | 说明 |
+核心二进制程序 (`meta-hybrid`) 会根据配置和系统兼容性为每个模块目录决定挂载方式：
+
+1.  **OverlayFS**：使用内核的 OverlayFS 将模块目录与系统分区合并。这是支持该文件系统的设备上的默认策略。
+2.  **Magic Mount**：使用递归 Bind Mount 镜像修改后的文件结构。当 OverlayFS 不可用或失败时，此策略作为回退方案运行。
+
+### 功能特性
+
+* **冲突检测**：扫描模块文件路径，识别多个模块修改同一文件时的冲突情况。
+* **模块隔离**：支持在隔离的命名空间中挂载模块。
+* **策略配置**：用户可通过 `config.toml` 强制特定分区或模块使用 OverlayFS 或 Magic Mount。
+* **恢复协议**：包含故障恢复机制，若因配置无效导致启动失败，将自动恢复默认配置。
+
+---
+
+## 配置
+
+配置文件位于 `/data/adb/meta-hybrid/config.toml`。
+
+| 参数 | 类型 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `moduledir` | string | `/data/adb/modules/` | 模块安装目录。 |
-| `mountsource` | string | `KSU` | 挂载源类型标识。 |
-| `partitions` | list | `[]` | 指定挂载的分区（留空则自动检测）。 |
-| `enable_nuke` | bool | `false` | 启用强力清理模式 (Nuke)。 |
-| `force_ext4` | bool | `false` | 强制为 Loop 设备使用 ext4 格式。 |
-| `disable_umount` | bool | `false` | 禁用卸载操作（用于排错）。 |
-| `allow_umount_coexistence`| bool | `false` | 允许与其他卸载方案共存。 |
-| `dry_run` | bool | `false` | 空跑模式（仅模拟，不执行更改）。 |
-| `verbose` | bool | `false` | 启用详细日志输出。 |
+| `moduledir` | string | `/data/adb/modules/` | 模块源目录路径。 |
+| `mountsource` | string | 自动检测 | 挂载源标签 (如 `KSU`, `APatch`)。 |
+| `partitions` | list | `[]` | 显式管理的分区列表。 |
+| `overlay_mode` | string | `tmpfs` | Loop 设备后端类型 (`tmpfs`, `ext4`, `erofs`)。 |
+| `disable_umount` | bool | `false` | 若为 true，则跳过卸载原始源（调试用途）。 |
+| `backup` | object | `{}` | 启动快照保留设置。 |
 
 ---
 
-## 🖥️ WebUI 管理
+## WebUI
 
-通过 KernelSU 管理器或浏览器访问 WebUI：
+项目提供了一个基于 **SolidJS** 开发的 Web 管理界面。
 
-* **仪表盘 (Dashboard)**：查看存储占用及内核信息。
-* **模块 (Modules)**：为每个模块单独切换模式 (Overlay/Magic)，查看文件冲突。
-* **配置 (Config)**：可视化编辑 `config.toml` 参数。
-* **日志 (Logs)**：实时流式查看守护进程日志。
+* **状态**：查看当前存储使用情况和内核版本。
+* **管理**：切换模块的挂载模式。
 
 ---
 
-## 🔨 构建指南
+## 构建指南
 
-本项目使用 Rust 的 `xtask` 模式进行统一构建。
+本项目使用 `xtask` 进行自动化构建。
 
 ### 环境要求
 
-* **Rust**: Nightly 工具链 (推荐使用 `rustup`)
-* **Android NDK**: 版本 r27+
-* **Node.js**: v20+ (用于构建 WebUI)
-* **Java**: JDK 17 (用于环境配置)
+* **Rust**: Nightly 工具链。
+* **Android NDK**: r27 或更新版本。
+* **Node.js**: v20+ (编译 WebUI 所需)。
 
-### 构建命令
+### 编译命令
 
-1. **克隆仓库**
-
-    ```bash
-    git clone --recursive [https://github.com/YuzakiKokuban/meta-hybrid_mount.git](https://github.com/YuzakiKokuban/meta-hybrid_mount.git)
-    cd meta-hybrid_mount
-    ```
-
-2. **完整构建 (Release)**
-    编译 WebUI、Rust 二进制文件 (arm64, x64, riscv64) 并打包 ZIP：
-
+1.  **完整构建 (二进制 + WebUI)**：
     ```bash
     cargo run -p xtask -- build --release
     ```
+    构建产物将生成在 `output/` 目录中。
 
-    构建产物将位于 `output/` 目录。
-
-3. **仅构建二进制**
-    跳过 WebUI 构建，加速 Rust 代码开发迭代：
-
+2.  **仅构建二进制**：
     ```bash
     cargo run -p xtask -- build --release --skip-webui
     ```
 
 ---
 
-## 🤝 致谢与协议
+## 协议
 
-* 感谢开源社区的所有贡献者。
-* **开源协议**: 本项目遵循 [GPL-3.0 协议](https://github.com/YuzakiKokuban/meta-hybrid_mount/blob/master/LICENSE)
+本项目遵循 [GPL-3.0 协议](LICENSE) 开源。
