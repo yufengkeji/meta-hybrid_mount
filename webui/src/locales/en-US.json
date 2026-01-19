@@ -108,21 +108,14 @@
     "addRule": "Add Path Rule",
     "noRules": "No path overrides defined.",
     "noDesc": "No description",
-    "checkConflicts": "Check Conflicts",
-    "hideConflicts": "Hide Conflicts",
-    "conflictsTitle": "File Conflicts",
-    "noConflicts": "No file conflicts detected.",
-    "conflictError": "Failed to check conflicts",
     "placeholder": "e.g. system/fonts",
     "modes": {
       "auto": "OverlayFS",
       "magic": "Magic Mount",
-      "hymo": "HymoFS",
       "ignore": "Disable (Ignore)",
       "short": {
         "auto": "Overlay",
         "magic": "Magic",
-        "hymo": "HymoFS",
         "ignore": "Ignore"
       }
     }
@@ -156,13 +149,5 @@
     "restoreAction": "Restore Snapshot",
     "restoring": "Restoring...",
     "create": "Create Backup"
-  },
-  "winnowing": {
-    "title": "Winnowing",
-    "searchPlaceholder": "Search paths...",
-    "emptyTitle": "All Clear",
-    "emptyDesc": "No conflicts detected.",
-    "conflictPath": "Conflict Path",
-    "selectProvider": "Select Provider"
   }
 }
