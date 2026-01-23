@@ -242,7 +242,6 @@ pub fn generate(
 
     for (part, layers) in overlay_groups.clone() {
         if part.trim() == "vendor" {
-            overlay_groups.remove(&part);
             log::debug!("Modification of the /vendor operation is temporarily disabled!");
             continue;
         }
@@ -251,10 +250,7 @@ pub fn generate(
 
         let target_path_obj = Path::new(&initial_target_path);
 
-        if fs::symlink_metadata(target_path_obj)
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false)
-        {
+        if target_path_obj.read_link().is_ok() {
             log::warn!(
                 "Skipping overlay on symlink partition: {}",
                 initial_target_path
