@@ -9,8 +9,7 @@ use std::{
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const CONFIG_FILE_DEFAULT: &str = "/data/adb/meta-hybrid/config.toml";
-use crate::defs::DEFAULT_HYBRID_MNT_DIR;
+use crate::defs;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupConfig {
@@ -78,15 +77,15 @@ pub struct Config {
 }
 
 fn default_hybrid_mnt_dir() -> String {
-    DEFAULT_HYBRID_MNT_DIR.to_string()
+    defs::DEFAULT_HYBRID_MNT_DIR.to_string()
 }
 
 fn default_moduledir() -> PathBuf {
-    PathBuf::from("/data/adb/modules/")
+    PathBuf::from(defs::MODULES_DIR)
 }
 
 fn default_mountsource() -> String {
-    crate::utils::detect_mount_source()
+    crate::utils::mount::detect_mount_source()
 }
 
 fn deserialize_partitions_flexible<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -137,7 +136,7 @@ impl Config {
     }
 
     pub fn load_default() -> Result<Self> {
-        Self::from_file(CONFIG_FILE_DEFAULT)
+        Self::from_file(defs::CONFIG_FILE)
     }
 
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {

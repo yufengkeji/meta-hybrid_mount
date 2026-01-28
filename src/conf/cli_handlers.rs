@@ -6,10 +6,10 @@ use serde::Serialize;
 use crate::{
     conf::{
         cli::{Cli, PoaceaeAction},
-        config::{CONFIG_FILE_DEFAULT, Config},
+        config::Config,
     },
     core::{granary, inventory, modules, planner, poaceae, storage},
-    utils,
+    defs, utils,
 };
 
 #[derive(Serialize)]
@@ -43,7 +43,7 @@ fn load_config(cli: &Cli) -> Result<Config> {
             } else {
                 Err(e).context(format!(
                     "Failed to load default config from {}",
-                    CONFIG_FILE_DEFAULT
+                    defs::CONFIG_FILE
                 ))
             }
         }
@@ -83,7 +83,7 @@ pub fn handle_save_config(cli: &Cli, payload: &str) -> Result<()> {
         serde_json::from_slice(&json_bytes).context("Failed to parse config JSON payload")?;
 
     config
-        .save_to_file(CONFIG_FILE_DEFAULT)
+        .save_to_file(defs::CONFIG_FILE)
         .context("Failed to save config file")?;
 
     println!("Configuration saved successfully.");
@@ -103,7 +103,7 @@ pub fn handle_save_module_rules(module_id: &str, payload: &str) -> Result<()> {
     let _rules: inventory::ModuleRules =
         serde_json::from_slice(&json_bytes).context("Failed to parse module rules JSON")?;
 
-    let rules_dir = Path::new("/data/adb/meta-hybrid/rules");
+    let rules_dir = Path::new(defs::RULES_DIR);
 
     if !rules_dir.exists() {
         std::fs::create_dir_all(rules_dir).with_context(|| {

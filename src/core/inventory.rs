@@ -69,7 +69,7 @@ impl ModuleRules {
             }
         }
 
-        let user_rules_dir = Path::new("/data/adb/meta-hybrid/rules");
+        let user_rules_dir = Path::new(defs::RULES_DIR);
 
         let user_config = user_rules_dir.join(format!("{}.json", module_id));
 

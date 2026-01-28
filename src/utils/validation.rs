@@ -1,9 +1,15 @@
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
+use std::{
+    path::Path,
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use anyhow::{Result, bail};
 use regex_lite::Regex;
+
+use crate::defs;
 
 pub static KSU: AtomicBool = AtomicBool::new(false);
 
@@ -42,7 +48,7 @@ pub fn extract_module_id(path: &Path) -> Option<String> {
 }
 
 pub fn check_zygisksu_enforce_status() -> bool {
-    std::fs::read_to_string("/data/adb/zygisksu/denylist_enforce")
+    std::fs::read_to_string(defs::ZYGISKSU_DENYLIST_FILE)
         .map(|s| s.trim() != "0")
         .unwrap_or(false)
 }

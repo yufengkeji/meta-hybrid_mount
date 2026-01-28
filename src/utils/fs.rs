@@ -1,19 +1,22 @@
-use std::collections::HashSet;
-use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink};
-use std::path::Path;
-use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashSet,
+    ffi::CString,
+    fs::{self, File, OpenOptions},
+    io::Write,
+    os::unix::{
+        ffi::OsStrExt,
+        fs::{FileTypeExt, MetadataExt, PermissionsExt, symlink},
+    },
+    path::Path,
+    process::Command,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context, Result, bail};
-use rustix::fs::ioctl_ficlone;
-use walkdir::WalkDir;
-
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use extattr::{Flags as XattrFlags, lgetxattr, llistxattr, lsetxattr};
+use rustix::fs::ioctl_ficlone;
+use walkdir::WalkDir;
 
 const SELINUX_XATTR: &str = "security.selinux";
 const OVERLAY_OPAQUE_XATTR: &str = "trusted.overlay.opaque";
@@ -394,8 +397,7 @@ pub fn prune_empty_dirs<P: AsRef<Path>>(root: P) -> Result<()> {
     {
         if entry.file_type().is_dir() {
             let path = entry.path();
-            if fs::remove_dir(path).is_ok() {
-            }
+            if fs::remove_dir(path).is_ok() {}
         }
     }
     Ok(())

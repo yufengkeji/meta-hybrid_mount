@@ -1,18 +1,23 @@
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
 
 use anyhow::{Context, Result, bail, ensure};
 use jwalk::WalkDir;
-use rustix::fs::Mode;
-use rustix::mount::{MountPropagationFlags, UnmountFlags, mount_change, unmount as umount};
+use rustix::{
+    fs::Mode,
+    mount::{MountPropagationFlags, UnmountFlags, mount_change, unmount as umount},
+};
 use serde::Serialize;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use crate::try_umount::send_umountable;
 use crate::{
     core::state::RuntimeState,
+    defs,
     mount::overlayfs::utils as overlay_utils,
     utils::{self, ensure_dir_exists, lsetfilecon},
 };
@@ -263,7 +268,7 @@ pub fn print_status() -> Result<()> {
     let state = RuntimeState::load().ok();
     let fallback_mnt = crate::conf::config::Config::load_default()
         .map(|c| c.hybrid_mnt_dir)
-        .unwrap_or_else(|_| crate::defs::DEFAULT_HYBRID_MNT_DIR.to_string());
+        .unwrap_or_else(|_| defs::DEFAULT_HYBRID_MNT_DIR.to_string());
     let (mnt_base, expected_mode) = if let Some(ref s) = state {
         (s.mount_point.clone(), s.storage_mode.clone())
     } else {
@@ -297,7 +302,7 @@ pub fn print_status() -> Result<()> {
     }
 
     let mut supported_modes = vec!["ext4".to_string(), "erofs".to_string()];
-    let check_dir = Path::new("/data/local/tmp/.mh_xattr_chk");
+    let check_dir = Path::new(defs::XATTR_CHECK_DIR);
     if utils::mount_tmpfs(check_dir, "mh_check").is_ok() {
         if utils::is_overlay_xattr_supported().unwrap_or(false) {
             supported_modes.insert(0, "tmpfs".to_string());
@@ -327,7 +332,7 @@ fn is_erofs_supported() -> bool {
 }
 
 fn create_erofs_image(src_dir: &Path, image_path: &Path) -> Result<()> {
-    let mkfs_bin = Path::new("/data/adb/metamodule/tools/mkfs.erofs");
+    let mkfs_bin = Path::new(defs::MKFS_EROFS_PATH);
     let cmd_name = if mkfs_bin.exists() {
         mkfs_bin.as_os_str()
     } else {

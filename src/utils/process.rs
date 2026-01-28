@@ -1,5 +1,7 @@
-use std::ffi::CString;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    ffi::CString,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::Result;
 

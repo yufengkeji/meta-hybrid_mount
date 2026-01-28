@@ -28,12 +28,8 @@ pub enum RecoveryStatus {
     Restored,
 }
 
-const RECOVERY_COUNTER_FILE: &str = "/data/adb/meta-hybrid/boot_counter";
-const RECOVERY_RESCUE_NOTICE: &str = "/data/adb/meta-hybrid/rescue_notice";
-const BACKUP_DIR: &str = "/data/adb/meta-hybrid/backups";
-
 pub fn ensure_recovery_state() -> Result<RecoveryStatus> {
-    let path = Path::new(RECOVERY_COUNTER_FILE);
+    let path = Path::new(defs::BOOT_COUNTER_FILE);
 
     let mut file = fs::File::options()
         .read(true)
@@ -76,7 +72,7 @@ pub fn ensure_recovery_state() -> Result<RecoveryStatus> {
                     snapshot_id
                 );
 
-                if let Err(e) = fs::write(RECOVERY_RESCUE_NOTICE, notice) {
+                if let Err(e) = fs::write(defs::RESCUE_NOTICE_FILE, notice) {
                     log::warn!("Failed to write rescue notice: {}", e);
                 }
 
@@ -97,7 +93,7 @@ pub fn ensure_recovery_state() -> Result<RecoveryStatus> {
 }
 
 pub fn reset_recovery_state() {
-    let path = Path::new(RECOVERY_COUNTER_FILE);
+    let path = Path::new(defs::BOOT_COUNTER_FILE);
 
     if path.exists() {
         if let Err(e) = fs::remove_file(path) {
@@ -109,13 +105,13 @@ pub fn reset_recovery_state() {
 }
 
 pub fn create_snapshot(config: &Config, label: &str, reason: &str) -> Result<String> {
-    if let Err(e) = fs::create_dir_all(BACKUP_DIR) {
+    if let Err(e) = fs::create_dir_all(defs::BACKUPS_DIR) {
         log::warn!("Failed to create backup dir: {}", e);
     }
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let id = format!("snap_{}", now);
-    let raw_config = fs::read_to_string(crate::conf::config::CONFIG_FILE_DEFAULT).ok();
+    let raw_config = fs::read_to_string(defs::CONFIG_FILE).ok();
     let raw_state = fs::read_to_string(crate::defs::STATE_FILE).ok();
 
     let snapshot = Snapshot {
@@ -128,7 +124,7 @@ pub fn create_snapshot(config: &Config, label: &str, reason: &str) -> Result<Str
         raw_state,
     };
 
-    let file_path = Path::new(BACKUP_DIR).join(format!("{}.json", id));
+    let file_path = Path::new(defs::BACKUPS_DIR).join(format!("{}.json", id));
     let json = serde_json::to_string_pretty(&snapshot)?;
 
     utils::atomic_write(&file_path, json)?;
@@ -143,11 +139,11 @@ pub fn create_snapshot(config: &Config, label: &str, reason: &str) -> Result<Str
 pub fn list_snapshots() -> Result<Vec<Snapshot>> {
     let mut snapshots = Vec::new();
 
-    if !Path::new(BACKUP_DIR).exists() {
+    if !Path::new(defs::BACKUPS_DIR).exists() {
         return Ok(snapshots);
     }
 
-    for entry in fs::read_dir(BACKUP_DIR)? {
+    for entry in fs::read_dir(defs::BACKUPS_DIR)? {
         let entry = entry?;
         let path = entry.path();
 
@@ -164,7 +160,7 @@ pub fn list_snapshots() -> Result<Vec<Snapshot>> {
 }
 
 pub fn delete_snapshot(id: &str) -> Result<()> {
-    let file_path = Path::new(BACKUP_DIR).join(format!("{}.json", id));
+    let file_path = Path::new(defs::BACKUPS_DIR).join(format!("{}.json", id));
 
     if file_path.exists() {
         fs::remove_file(&file_path)?;
@@ -176,7 +172,7 @@ pub fn delete_snapshot(id: &str) -> Result<()> {
 }
 
 pub fn restore_snapshot(id: &str) -> Result<()> {
-    let file_path = Path::new(BACKUP_DIR).join(format!("{}.json", id));
+    let file_path = Path::new(defs::BACKUPS_DIR).join(format!("{}.json", id));
 
     if !file_path.exists() {
         bail!("Snapshot {} not found", id);
@@ -193,11 +189,11 @@ pub fn restore_snapshot(id: &str) -> Result<()> {
 
     if let Some(raw) = &snapshot.raw_config {
         log::info!(">> Restoring config from RAW content...");
-        utils::atomic_write(crate::conf::config::CONFIG_FILE_DEFAULT, raw)?;
+        utils::atomic_write(defs::CONFIG_FILE, raw)?;
     } else {
         log::info!(">> Raw config missing, restoring from struct...");
         let toml_str = toml::to_string(&snapshot.config_snapshot)?;
-        utils::atomic_write(crate::conf::config::CONFIG_FILE_DEFAULT, toml_str)?;
+        utils::atomic_write(defs::CONFIG_FILE, toml_str)?;
     }
 
     if let Some(state) = &snapshot.raw_state {
@@ -243,7 +239,7 @@ fn prune_snapshots(config: &Config) -> Result<()> {
         }
 
         if should_delete {
-            let path = Path::new(BACKUP_DIR).join(format!("{}.json", snapshot.id));
+            let path = Path::new(defs::BACKUPS_DIR).join(format!("{}.json", snapshot.id));
             if let Err(e) = fs::remove_file(&path) {
                 log::warn!("Failed to delete old snapshot {}: {}", snapshot.id, e);
             } else {

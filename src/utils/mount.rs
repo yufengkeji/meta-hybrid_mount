@@ -1,6 +1,4 @@
-use std::fs;
-use std::path::Path;
-use std::process::Command;
+use std::{fs, path::Path, process::Command};
 
 use anyhow::{Context, Result, bail};
 use procfs::process::Process;
