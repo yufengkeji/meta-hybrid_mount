@@ -13,8 +13,12 @@ use extattr::lgetxattr;
 use regex_lite::Regex;
 use serde::Serialize;
 
-use super::scanner::{self as inventory, MountMode};
-use crate::{conf::config::Config, core::state::RuntimeState, defs, utils};
+use super::scanner as inventory;
+use crate::{
+    conf::config::{self, MountMode},
+    core::state::RuntimeState,
+    defs, utils,
+};
 
 static MODULE_PROP_REGEX: OnceLock<Regex> = OnceLock::new();
 
@@ -62,7 +66,7 @@ struct ModuleInfo {
     description: String,
     mode: String,
     is_mounted: bool,
-    rules: inventory::ModuleRules,
+    rules: config::ModuleRules,
 }
 
 impl ModuleInfo {
@@ -141,7 +145,7 @@ impl ModuleFile {
     }
 }
 
-pub fn print_list(config: &Config) -> Result<()> {
+pub fn print_list(config: &config::Config) -> Result<()> {
     let modules = inventory::scan(&config.moduledir, config)?;
 
     let state = RuntimeState::load().unwrap_or_default();

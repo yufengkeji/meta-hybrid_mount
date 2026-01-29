@@ -6,99 +6,55 @@ use std::{
 
 use anyhow::Result;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::{conf::config, defs};
+use crate::{
+    conf::config::{self, ModuleRules, MountMode},
+    defs,
+};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum MountMode {
-    #[default]
-    Overlay,
-    Magic,
-    Ignore,
-}
+fn load_module_rules(module_dir: &Path, module_id: &str, cfg: &config::Config) -> ModuleRules {
+    let mut rules = ModuleRules {
+        default_mode: match cfg.default_mode {
+            config::DefaultMode::Overlay => MountMode::Overlay,
+            config::DefaultMode::Magic => MountMode::Magic,
+        },
+        ..Default::default()
+    };
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ModuleRules {
-    #[serde(default)]
-    pub default_mode: MountMode,
-    #[serde(default)]
-    pub paths: HashMap<String, MountMode>,
-}
+    #[derive(Deserialize)]
+    struct PartialRules {
+        default_mode: Option<MountMode>,
+        paths: Option<HashMap<String, MountMode>>,
+    }
 
-impl ModuleRules {
-    pub fn load(module_dir: &Path, module_id: &str, cfg: &config::Config) -> Self {
-        let mut rules = ModuleRules {
-            default_mode: match cfg.default_mode {
-                config::DefaultMode::Overlay => MountMode::Overlay,
-                config::DefaultMode::Magic => MountMode::Magic,
-            },
-            ..Default::default()
-        };
+    let internal_config = module_dir.join("hybrid_rules.json");
 
-        #[derive(Deserialize)]
-        struct PartialRules {
-            default_mode: Option<MountMode>,
-            paths: Option<HashMap<String, MountMode>>,
-        }
-
-        let internal_config = module_dir.join("hybrid_rules.json");
-
-        if internal_config.exists() {
-            match fs::read_to_string(&internal_config) {
-                Ok(content) => match serde_json::from_str::<PartialRules>(&content) {
-                    Ok(partial) => {
-                        if let Some(mode) = partial.default_mode {
-                            rules.default_mode = mode;
-                        }
-                        if let Some(paths) = partial.paths {
-                            rules.paths = paths;
-                        }
+    if internal_config.exists() {
+        match fs::read_to_string(&internal_config) {
+            Ok(content) => match serde_json::from_str::<PartialRules>(&content) {
+                Ok(partial) => {
+                    if let Some(mode) = partial.default_mode {
+                        rules.default_mode = mode;
                     }
-                    Err(e) => {
-                        log::warn!("Failed to parse rules for module '{}': {}", module_id, e)
+                    if let Some(paths) = partial.paths {
+                        rules.paths = paths;
                     }
-                },
-                Err(e) => log::warn!("Failed to read rule file for '{}': {}", module_id, e),
-            }
-        }
-
-        let user_rules_dir = Path::new(defs::RULES_DIR);
-
-        let user_config = user_rules_dir.join(format!("{}.json", module_id));
-
-        if user_config.exists() {
-            match fs::read_to_string(&user_config) {
-                Ok(content) => match serde_json::from_str::<PartialRules>(&content) {
-                    Ok(user_rules) => {
-                        if let Some(mode) = user_rules.default_mode {
-                            rules.default_mode = mode;
-                        }
-                        if let Some(paths) = user_rules.paths {
-                            rules.paths.extend(paths);
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to parse user rules for '{}': {}", module_id, e)
-                    }
-                },
-                Err(e) => {
-                    log::warn!("Failed to read user rule file for '{}': {}", module_id, e)
                 }
-            }
+                Err(e) => {
+                    log::warn!("Failed to parse rules for module '{}': {}", module_id, e)
+                }
+            },
+            Err(e) => log::warn!("Failed to read rule file for '{}': {}", module_id, e),
         }
-
-        rules
     }
 
-    pub fn get_mode(&self, relative_path: &str) -> MountMode {
-        if let Some(mode) = self.paths.get(relative_path) {
-            return mode.clone();
-        }
-
-        self.default_mode.clone()
+    if let Some(global_rules) = cfg.rules.get(module_id) {
+        rules.default_mode = global_rules.default_mode.clone();
+        rules.paths.extend(global_rules.paths.clone());
     }
+
+    rules
 }
 
 #[derive(Debug, Clone)]
@@ -140,7 +96,7 @@ pub fn scan(source_dir: &Path, cfg: &config::Config) -> Result<Vec<Module>> {
                 return None;
             }
 
-            let rules = ModuleRules::load(&path, &id, cfg);
+            let rules = load_module_rules(&path, &id, cfg);
 
             Some(Module {
                 id,

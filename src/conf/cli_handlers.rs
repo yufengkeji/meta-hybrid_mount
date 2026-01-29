@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::{
     conf::{
         cli::{Cli, PoaceaeAction},
-        config::Config,
+        config::{self, Config},
     },
     core::{
         inventory,
@@ -100,33 +100,23 @@ pub fn handle_save_config(cli: &Cli, payload: &str) -> Result<()> {
 
 pub fn handle_save_module_rules(module_id: &str, payload: &str) -> Result<()> {
     utils::validate_module_id(module_id)?;
-
     let json_bytes = (0..payload.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&payload[i..i + 2], 16))
         .collect::<Result<Vec<u8>, _>>()
         .context("Failed to decode hex payload")?;
 
-    let _rules: inventory::ModuleRules =
+    let new_rules: config::ModuleRules =
         serde_json::from_slice(&json_bytes).context("Failed to parse module rules JSON")?;
+    let mut config = Config::load_default().unwrap_or_default();
 
-    let rules_dir = Path::new(defs::RULES_DIR);
+    config.rules.insert(module_id.to_string(), new_rules);
 
-    if !rules_dir.exists() {
-        std::fs::create_dir_all(rules_dir).with_context(|| {
-            format!(
-                "Failed to create rules directory at {}",
-                rules_dir.display()
-            )
-        })?;
-    }
+    config
+        .save_to_file(defs::CONFIG_FILE)
+        .context("Failed to update config file with new rules")?;
 
-    let rule_file = rules_dir.join(format!("{}.json", module_id));
-
-    std::fs::write(&rule_file, json_bytes)
-        .with_context(|| format!("Failed to write rule file to {}", rule_file.display()))?;
-
-    println!("Module rules saved for {}", module_id);
+    println!("Module rules saved for {} into config.toml", module_id);
 
     Ok(())
 }

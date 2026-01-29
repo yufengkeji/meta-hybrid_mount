@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -50,6 +51,32 @@ pub enum DefaultMode {
     Magic,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MountMode {
+    #[default]
+    Overlay,
+    Magic,
+    Ignore,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModuleRules {
+    #[serde(default)]
+    pub default_mode: MountMode,
+    #[serde(default)]
+    pub paths: HashMap<String, MountMode>,
+}
+
+impl ModuleRules {
+    pub fn get_mode(&self, relative_path: &str) -> MountMode {
+        if let Some(mode) = self.paths.get(relative_path) {
+            return mode.clone();
+        }
+        self.default_mode.clone()
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default = "default_moduledir")]
@@ -71,6 +98,8 @@ pub struct Config {
     pub hybrid_mnt_dir: String,
     #[serde(default)]
     pub default_mode: DefaultMode,
+    #[serde(default)]
+    pub rules: HashMap<String, ModuleRules>,
 }
 
 fn default_hybrid_mnt_dir() -> String {
@@ -119,6 +148,7 @@ impl Default for Config {
             backup: BackupConfig::default(),
             hybrid_mnt_dir: default_hybrid_mnt_dir(),
             default_mode: DefaultMode::default(),
+            rules: HashMap::new(),
         }
     }
 }
